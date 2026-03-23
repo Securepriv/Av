@@ -1224,8 +1224,20 @@ const Invoices=({T})=>{
   const changeStatus=async(id,status)=>{
     await supabase.from('invoices').update({status}).eq('id',id)
     setInvoices(inv=>inv.map(i=>i.id===id?{...i,status}:i))
-    // Si on marque payée, recharger les sessions disponibles
-    if(status==='payée') loadSessions(form.clientId)
+    // Quand on marque payée : marquer TOUTES les sessions liées à cette facture comme facturées
+    if(status==='payée'){
+      const invoice=invoices.find(i=>i.id===id)
+      if(invoice?.items){
+        const sessionIds=(invoice.items||[])
+          .filter(item=>item.session_id)
+          .map(item=>item.session_id)
+        if(sessionIds.length>0){
+          await supabase.from('sessions').update({invoiced:true}).in('id',sessionIds)
+        }
+      }
+      // Recharger les sessions disponibles pour la création
+      if(form.clientId) loadSessions(form.clientId)
+    }
     notify('Statut mis à jour.')
   }
 
