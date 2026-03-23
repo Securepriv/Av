@@ -1090,13 +1090,13 @@ const Invoices=({T})=>{
   const[loading,setLoading]=useState(true)
   const[loadingSessions,setLoadingSessions]=useState(false)
   const[showForm,setShowForm]=useState(false)
+  const[invoiceMode,setInvoiceMode]=useState('hours') // 'hours' | 'free'
   const[saving,setSaving]=useState(false)
   const[filter,setFilter]=useState('toutes')
   const[toast,setToast]=useState(null)
   const[selectedSessions,setSelectedSessions]=useState([])
-  const[extraItems,setExtraItems]=useState([])
-  const[form,setForm]=useState({clientId:'',dueDate:''})
-  // PDF preview
+  const[freeItems,setFreeItems]=useState([{service:'',qty:1,rate:0,unit:'forfait'}])
+  const[form,setForm]=useState({clientId:'',dueDate:'',freeClientName:'',freeClientEmail:''})
   const[pdfInvoice,setPdfInvoice]=useState(null)
   const[pdfClient,setPdfClient]=useState(null)
   const[visibleFields,setVisibleFields]=useState({})
@@ -1104,24 +1104,41 @@ const Invoices=({T})=>{
   const notify=(msg,type='ok')=>{setToast({msg,type});setTimeout(()=>setToast(null),3000)}
 
   const load=useCallback(async()=>{
+    const {data:{user}} = await supabase.auth.getUser()
     const[{data:inv},{data:cli},{data:set}]=await Promise.all([
       supabase.from('invoices').select('*,clients(name,email,company,phone,vat_id,color)').order('created_at',{ascending:false}),
       supabase.from('clients').select('*').order('name'),
-      supabase.from('settings').select('*').single(),
+      supabase.from('settings').select('*').eq('user_id',user.id).single(),
     ])
-    setInvoices(inv||[]);setClients(cli||[]);setSettings(set)
-    if(cli?.length)setForm(f=>({...f,clientId:cli[0].id}))
+    setInvoices(inv||[])
+    setClients(cli||[])
+    // Injecter l'email de l'utilisateur dans les settings pour le PDF
+    setSettings(set ? {...set, email: user.email} : {email: user.email})
+    if(cli?.length) setForm(f=>({...f,clientId:cli[0].id}))
     setLoading(false)
   },[])
   useEffect(()=>{load()},[load])
 
+  // Charger sessions non facturées ET dont la facture n'est pas payée
   const loadSessions=useCallback(async(clientId)=>{
-    if(!clientId)return
+    if(!clientId) return
     setLoadingSessions(true);setSelectedSessions([])
-    const{data}=await supabase.from('sessions').select('*').eq('client_id',clientId).eq('invoiced',false).order('date',{ascending:false})
-    setSessions(data||[]);setLoadingSessions(false)
+    // Récupérer les IDs des factures payées de ce client
+    const {data:paidInvs} = await supabase.from('invoices')
+      .select('id').eq('client_id',clientId).eq('status','payée')
+    const paidInvIds = (paidInvs||[]).map(i=>i.id)
+
+    // Sessions non facturées uniquement
+    const {data} = await supabase.from('sessions')
+      .select('*')
+      .eq('client_id',clientId)
+      .eq('invoiced',false)
+      .order('date',{ascending:false})
+
+    setSessions(data||[])
+    setLoadingSessions(false)
   },[])
-  useEffect(()=>{if(form.clientId)loadSessions(form.clientId)},[form.clientId,loadSessions])
+  useEffect(()=>{if(form.clientId && invoiceMode==='hours') loadSessions(form.clientId)},[form.clientId,invoiceMode,loadSessions])
 
   const toggleSession=(id)=>setSelectedSessions(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id])
   const toggleAll=()=>setSelectedSessions(s=>s.length===sessions.length?[]:sessions.map(x=>x.id))
@@ -1130,35 +1147,86 @@ const Invoices=({T})=>{
   const checkedSessions=sessions.filter(s=>selectedSessions.includes(s.id))
   const hoursTotal=checkedSessions.reduce((a,s)=>a+Number(s.duration),0)
   const hoursAmount=hoursTotal*(client?.rate||0)
-  const extraAmount=extraItems.reduce((a,i)=>a+Number(i.qty||0)*Number(i.rate||0),0)
-  const grandTotal=hoursAmount+extraAmount
+  const freeTotal=freeItems.reduce((a,i)=>a+Number(i.qty||0)*Number(i.rate||0),0)
+  const grandTotal=invoiceMode==='hours'?hoursAmount:freeTotal
 
-  const addExtraItem=()=>setExtraItems(e=>[...e,{service:'',qty:1,rate:0}])
-  const updateExtra=(i,k,v)=>{const items=[...extraItems];items[i]={...items[i],[k]:v};setExtraItems(items)}
+  const addFreeItem=()=>setFreeItems(e=>[...e,{service:'',qty:1,rate:0,unit:'forfait'}])
+  const updateFreeItem=(i,k,v)=>{const items=[...freeItems];items[i]={...items[i],[k]:v};setFreeItems(items)}
 
   const create=async()=>{
-    if(!form.clientId)return
+    if(invoiceMode==='hours' && !form.clientId) return
+    if(invoiceMode==='free' && !form.freeClientName.trim()) return notify('Le nom du client est requis.','error')
+    if(grandTotal===0) return notify('Le montant total doit être supérieur à 0.','error')
+
     setSaving(true)
     const{data:{user}}=await supabase.auth.getUser()
     const{count}=await supabase.from('invoices').select('*',{count:'exact',head:true}).eq('user_id',user.id)
     const num=`FAC-${String((count||0)+1).padStart(3,'0')}`
-    const items=[
-      ...checkedSessions.map(s=>({service:s.task||'Heures travaillées',qty:Number(s.duration),rate:client?.rate||0,date:s.date,session_id:s.id})),
-      ...extraItems.filter(i=>i.service&&Number(i.rate)>0),
-    ]
-    const{error}=await supabase.from('invoices').insert({
-      user_id:user.id,client_id:form.clientId,invoice_number:num,items,
-      amount:grandTotal,due_date:form.dueDate||null,status:'brouillon'
-    })
+
+    let items=[]
+    let clientIdToSave=form.clientId||null
+
+    if(invoiceMode==='hours'){
+      items=checkedSessions.map(s=>({
+        service:s.task||'Heures travaillées',
+        qty:Number(s.duration),
+        rate:client?.rate||0,
+        date:s.date,
+        session_id:s.id,
+        unit:'h'
+      }))
+    } else {
+      items=freeItems.filter(i=>i.service&&Number(i.rate)>0).map(i=>({
+        service:i.service,
+        qty:Number(i.qty||1),
+        rate:Number(i.rate||0),
+        unit:i.unit||'forfait',
+        description:i.description||''
+      }))
+    }
+
+    const payload={
+      user_id:user.id,
+      client_id:clientIdToSave,
+      invoice_number:num,
+      items,
+      amount:grandTotal,
+      due_date:form.dueDate||null,
+      status:'brouillon',
+      // Snapshot des infos AV au moment de la création
+      av_snapshot:{
+        full_name:settings?.full_name||'',
+        email:settings?.email||user.email||'',
+        siret:settings?.siret||'',
+        tva_number:settings?.tva_number||'',
+        bank_details:settings?.bank_details||'',
+      },
+      // Pour facture libre : infos client en direct
+      free_client_name: invoiceMode==='free'?form.freeClientName:null,
+      free_client_email: invoiceMode==='free'?form.freeClientEmail:null,
+    }
+
+    const{error}=await supabase.from('invoices').insert(payload)
     if(error){notify(error.message,'error');setSaving(false);return}
-    if(selectedSessions.length>0)await supabase.from('sessions').update({invoiced:true}).in('id',selectedSessions)
-    notify('Facture créée !');setShowForm(false);setSelectedSessions([]);setExtraItems([]);setSessions([]);setForm(f=>({...f,dueDate:''}));load()
+
+    // Marquer sessions comme facturées
+    if(invoiceMode==='hours' && selectedSessions.length>0){
+      await supabase.from('sessions').update({invoiced:true}).in('id',selectedSessions)
+    }
+
+    notify('Facture créée !')
+    setShowForm(false);setSelectedSessions([]);setFreeItems([{service:'',qty:1,rate:0,unit:'forfait'}])
+    setForm(f=>({...f,dueDate:'',freeClientName:'',freeClientEmail:''}))
+    load()
     setSaving(false)
   }
 
   const changeStatus=async(id,status)=>{
     await supabase.from('invoices').update({status}).eq('id',id)
-    setInvoices(inv=>inv.map(i=>i.id===id?{...i,status}:i));notify('Statut mis à jour.')
+    setInvoices(inv=>inv.map(i=>i.id===id?{...i,status}:i))
+    // Si on marque payée, recharger les sessions disponibles
+    if(status==='payée') loadSessions(form.clientId)
+    notify('Statut mis à jour.')
   }
 
   const del=async(id)=>{
@@ -1167,128 +1235,149 @@ const Invoices=({T})=>{
     setInvoices(inv=>inv.filter(i=>i.id!==id));notify('Facture supprimée.')
   }
 
-  // Ouvrir le preview PDF
   const openPDF=(inv)=>{
     const c=clients.find(x=>x.id===inv.client_id)||inv.clients
-    setPdfInvoice(inv);setPdfClient(c)
-    // Initialiser les champs visibles
-    const init={av_name:true,av_email:true,av_siret:true,av_tva:true,client_name:true,client_company:true,client_email:true,client_phone:true,client_vat:true}
-    setVisibleFields(init)
+    // Utiliser le snapshot AV si disponible, sinon les settings actuels
+    const avData = inv.av_snapshot || settings
+    setPdfInvoice({...inv, _avData: avData})
+    setPdfClient(c)
+    setVisibleFields({av_name:!!(avData?.full_name),av_email:!!(avData?.email),av_siret:!!(avData?.siret),av_tva:!!(avData?.tva_number),av_bank:!!(avData?.bank_details),client_name:true,client_company:!!(c?.company),client_email:!!(c?.email),client_phone:!!(c?.phone),client_vat:!!(c?.vat_id)})
   }
 
   const sendByEmail=(inv,c)=>{
+    const avData=inv._avData||inv.av_snapshot||settings
     const subject=encodeURIComponent(`Facture ${inv.invoice_number}`)
-    const body=encodeURIComponent(`Bonjour,\n\nVeuillez trouver ci-joint la facture ${inv.invoice_number} d'un montant de ${Number(inv.amount).toLocaleString('fr')} €.\n\nCordialement,\n${settings?.full_name||''}`)
-    window.open(`mailto:${c?.email||''}?subject=${subject}&body=${body}`)
+    const body=encodeURIComponent(`Bonjour,\n\nVeuillez trouver ci-joint la facture ${inv.invoice_number} d'un montant de ${Number(inv.amount).toLocaleString('fr')} €.\n\nCordialement,\n${avData?.full_name||''}`)
+    window.open(`mailto:${c?.email||inv.free_client_email||''}?subject=${subject}&body=${body}`)
   }
 
   const FILTERS=['toutes','brouillon','envoyée','en retard','payée']
   const filtered=filter==='toutes'?invoices:invoices.filter(i=>i.status===filter)
 
-  // PDF PREVIEW MODAL
+  // ── PDF PREVIEW ──
   if(pdfInvoice){
+    const avData=pdfInvoice._avData||pdfInvoice.av_snapshot||settings
+    const clientName=pdfClient?.name||pdfInvoice.free_client_name||'—'
+    const clientEmail=pdfClient?.email||pdfInvoice.free_client_email||''
+
     const fields=[
-      {key:'av_name',label:`Nom AV : ${settings?.full_name||'—'}`},
-      {key:'av_email',label:`Email AV : ${settings?.email||'—'}`},
-      {key:'av_siret',label:`SIRET : ${settings?.siret||'—'}`},
-      {key:'av_tva',label:`N° TVA AV : ${settings?.tva_number||'—'}`},
-      {key:'client_name',label:`Nom client : ${pdfClient?.name||'—'}`},
-      {key:'client_company',label:`Société : ${pdfClient?.company||'—'}`},
-      {key:'client_email',label:`Email client : ${pdfClient?.email||'—'}`},
-      {key:'client_phone',label:`Tél client : ${pdfClient?.phone||'—'}`},
-      {key:'client_vat',label:`TVA client : ${pdfClient?.vat_id||'—'}`},
+      {key:'av_name',   label:`Ton nom : ${avData?.full_name||'Non renseigné'}`,    warn:!avData?.full_name},
+      {key:'av_email',  label:`Ton email : ${avData?.email||'Non renseigné'}`,      warn:!avData?.email},
+      {key:'av_siret',  label:`SIRET : ${avData?.siret||'Non renseigné'}`,           warn:!avData?.siret},
+      {key:'av_tva',    label:`N° TVA : ${avData?.tva_number||'Non renseigné'}`,     warn:false},
+      {key:'av_bank',   label:`Coordonnées bancaires`,                               warn:false},
+      {key:'client_name',   label:`Client : ${clientName}`},
+      {key:'client_company',label:`Société : ${pdfClient?.company||'—'}`,            warn:false},
+      {key:'client_email',  label:`Email client : ${clientEmail||'—'}`,              warn:false},
+      {key:'client_phone',  label:`Tél client : ${pdfClient?.phone||'—'}`,           warn:false},
+      {key:'client_vat',    label:`TVA client : ${pdfClient?.vat_id||'—'}`,          warn:false},
     ]
+
     return(
       <div className="main-content" style={{padding:'28px 32px'}}>
-        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:28}}>
+        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:20}}>
           <Btn variant="ghost" onClick={()=>setPdfInvoice(null)} T={T}>← Retour</Btn>
-          <h1 style={{fontSize:20,fontWeight:800,color:T.text}}>Aperçu facture — {pdfInvoice.invoice_number}</h1>
+          <h1 style={{fontSize:20,fontWeight:800,color:T.text}}>Aperçu — {pdfInvoice.invoice_number}</h1>
         </div>
-        <div className="grid-2" style={{display:'grid',gridTemplateColumns:'300px 1fr',gap:20,alignItems:'start'}}>
+
+        {/* Warning si infos AV manquantes */}
+        {(!avData?.full_name||!avData?.siret)&&(
+          <div style={{padding:'10px 16px',background:T.warningBg,border:`1px solid ${T.warning}40`,borderRadius:10,fontSize:13,color:T.warning,marginBottom:16}}>
+            ⚠ Certaines informations de ton profil sont manquantes. Va dans <strong>Paramètres</strong> pour les compléter avant d'envoyer.
+          </div>
+        )}
+
+        <div className="grid-2" style={{display:'grid',gridTemplateColumns:'280px 1fr',gap:20,alignItems:'start'}}>
           <Card T={T}>
-            <div style={{fontWeight:700,fontSize:14,color:T.text,marginBottom:16}}>Informations à inclure</div>
-            <div style={{fontSize:12,color:T.textMuted,marginBottom:14}}>Clique sur une ligne pour la masquer dans le PDF.</div>
-            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+            <div style={{fontWeight:700,fontSize:14,color:T.text,marginBottom:12}}>Informations incluses</div>
+            <div style={{fontSize:12,color:T.textMuted,marginBottom:12}}>Clique pour masquer/afficher dans le PDF.</div>
+            <div style={{display:'flex',flexDirection:'column',gap:6}}>
               {fields.map(f=>{
                 const visible=visibleFields[f.key]!==false
                 return(
                   <div key={f.key} onClick={()=>setVisibleFields(v=>({...v,[f.key]:!visible}))}
-                    style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 12px',borderRadius:8,background:visible?T.accentLight:T.surfaceHigh,border:`1px solid ${visible?T.accent+'40':T.border}`,cursor:'pointer',transition:'all .15s'}}>
-                    <span style={{fontSize:12,color:visible?T.text:T.textDim,textDecoration:visible?'none':'line-through'}}>{f.label}</span>
-                    <span style={{fontSize:11,color:visible?T.accent:T.textDim,fontWeight:600}}>{visible?'Affiché':'Masqué'}</span>
+                    style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'7px 10px',borderRadius:8,background:visible?T.accentLight:T.surfaceHigh,border:`1px solid ${visible?T.accent+'40':T.border}`,cursor:'pointer',transition:'all .15s'}}>
+                    <span style={{fontSize:11,color:visible?T.text:T.textDim,textDecoration:visible?'none':'line-through',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{f.label}</span>
+                    {f.warn&&visible&&<span style={{fontSize:10,color:T.warning,marginRight:4}}>!</span>}
+                    <span style={{fontSize:10,color:visible?T.accent:T.textDim,fontWeight:600,flexShrink:0,marginLeft:6}}>{visible?'✓':'—'}</span>
                   </div>
                 )
               })}
             </div>
-            <div style={{marginTop:20,display:'flex',flexDirection:'column',gap:10}}>
-              <Btn full onClick={()=>generatePDF(pdfInvoice,pdfClient,settings,visibleFields)} T={T}>⬇ Télécharger PDF</Btn>
+            <div style={{marginTop:16,display:'flex',flexDirection:'column',gap:8}}>
+              <Btn full onClick={()=>generatePDF(pdfInvoice,pdfClient,avData,visibleFields)} T={T}>⬇ Télécharger / Imprimer</Btn>
               <Btn full variant="success" onClick={()=>sendByEmail(pdfInvoice,pdfClient)} T={T}>✉ Envoyer par email</Btn>
-              <Btn full variant="ghost" onClick={()=>setPdfInvoice(null)} T={T}>Annuler</Btn>
+              <Btn full variant="ghost" onClick={()=>setPdfInvoice(null)} T={T}>Fermer</Btn>
             </div>
           </Card>
 
-          {/* Preview facture */}
           <Card T={T} style={{padding:0,overflow:'hidden'}}>
-            <div style={{background:'#FFFFFF',padding:'40px',fontFamily:'Helvetica Neue,Arial,sans-serif',color:'#1A1916',minHeight:600}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:36,paddingBottom:20,borderBottom:'2px solid #1A1916'}}>
-                <div style={{fontSize:22,fontWeight:800}}><span style={{color:'#1A6B4A'}}>VA</span>Billing</div>
+            <div style={{background:'#FFFFFF',padding:'36px',fontFamily:'Helvetica Neue,Arial,sans-serif',color:'#1A1916',minHeight:600}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:32,paddingBottom:18,borderBottom:'2px solid #1A1916'}}>
+                <div style={{fontSize:20,fontWeight:800}}><span style={{color:'#1A6B4A'}}>VA</span>Billing</div>
                 <div style={{textAlign:'right'}}>
-                  <div style={{fontSize:26,fontWeight:800,color:'#1A1916'}}>FACTURE</div>
-                  <div style={{fontSize:13,color:'#6B6963',fontFamily:'monospace'}}>{pdfInvoice.invoice_number}</div>
+                  <div style={{fontSize:24,fontWeight:800}}>FACTURE</div>
+                  <div style={{fontSize:12,color:'#6B6963',fontFamily:'monospace'}}>{pdfInvoice.invoice_number}</div>
                 </div>
               </div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:32,marginBottom:28}}>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:28,marginBottom:24}}>
                 <div>
-                  <div style={{fontSize:10,fontWeight:700,letterSpacing:'.1em',textTransform:'uppercase',color:'#A8A5A0',marginBottom:8}}>ÉMETTEUR</div>
-                  {visibleFields.av_name!==false&&<div style={{fontWeight:700,marginBottom:3}}>{settings?.full_name||'Votre nom'}</div>}
-                  <div style={{fontSize:12,color:'#6B6963',lineHeight:1.7}}>
-                    {visibleFields.av_email!==false&&settings?.email&&<div>{settings.email}</div>}
-                    {visibleFields.av_siret!==false&&settings?.siret&&<div>SIRET : {settings.siret}</div>}
-                    {visibleFields.av_tva!==false&&settings?.tva_number&&<div>TVA : {settings.tva_number}</div>}
+                  <div style={{fontSize:9,fontWeight:700,letterSpacing:'.1em',textTransform:'uppercase',color:'#A8A5A0',marginBottom:6}}>ÉMETTEUR</div>
+                  {visibleFields.av_name!==false&&<div style={{fontWeight:700,marginBottom:2,fontSize:13}}>{avData?.full_name||<span style={{color:'#DC2626',fontStyle:'italic'}}>Nom non renseigné</span>}</div>}
+                  <div style={{fontSize:11,color:'#6B6963',lineHeight:1.8}}>
+                    {visibleFields.av_email!==false&&<div>{avData?.email||''}</div>}
+                    {visibleFields.av_siret!==false&&avData?.siret&&<div>SIRET : {avData.siret}</div>}
+                    {visibleFields.av_tva!==false&&avData?.tva_number&&<div>TVA : {avData.tva_number}</div>}
                   </div>
                 </div>
                 <div>
-                  <div style={{fontSize:10,fontWeight:700,letterSpacing:'.1em',textTransform:'uppercase',color:'#A8A5A0',marginBottom:8}}>CLIENT</div>
-                  {visibleFields.client_name!==false&&<div style={{fontWeight:700,marginBottom:3}}>{pdfClient?.name||'—'}</div>}
-                  <div style={{fontSize:12,color:'#6B6963',lineHeight:1.7}}>
+                  <div style={{fontSize:9,fontWeight:700,letterSpacing:'.1em',textTransform:'uppercase',color:'#A8A5A0',marginBottom:6}}>CLIENT</div>
+                  {visibleFields.client_name!==false&&<div style={{fontWeight:700,marginBottom:2,fontSize:13}}>{clientName}</div>}
+                  <div style={{fontSize:11,color:'#6B6963',lineHeight:1.8}}>
                     {visibleFields.client_company!==false&&pdfClient?.company&&<div>{pdfClient.company}</div>}
-                    {visibleFields.client_email!==false&&pdfClient?.email&&<div>{pdfClient.email}</div>}
+                    {visibleFields.client_email!==false&&clientEmail&&<div>{clientEmail}</div>}
                     {visibleFields.client_phone!==false&&pdfClient?.phone&&<div>Tél : {pdfClient.phone}</div>}
                     {visibleFields.client_vat!==false&&pdfClient?.vat_id&&<div>TVA : {pdfClient.vat_id}</div>}
                   </div>
                 </div>
               </div>
-              <div style={{background:'#F8F7F4',borderRadius:8,padding:'14px 16px',display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12,marginBottom:24}}>
-                {[['Date','',pdfInvoice.date||new Date().toLocaleDateString('fr')],['Échéance','',pdfInvoice.due_date||'—'],['Statut','',pdfInvoice.status]].map(([label,,val])=>(
-                  <div key={label}><div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'#A8A5A0',marginBottom:3}}>{label}</div><div style={{fontSize:13,fontWeight:600}}>{val}</div></div>
+              <div style={{background:'#F8F7F4',borderRadius:8,padding:'12px 14px',display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:20}}>
+                {[['Date',pdfInvoice.date||new Date().toLocaleDateString('fr')],['Échéance',pdfInvoice.due_date||'—'],['Statut',pdfInvoice.status]].map(([label,val])=>(
+                  <div key={label}><div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'#A8A5A0',marginBottom:2}}>{label}</div><div style={{fontSize:12,fontWeight:600}}>{val}</div></div>
                 ))}
               </div>
-              <table style={{width:'100%',borderCollapse:'collapse',marginBottom:20}}>
-                <thead><tr style={{background:'#1A1916',color:'#FFFFFF'}}>
-                  <th style={{padding:'10px 14px',textAlign:'left',fontSize:11,letterSpacing:'.05em'}}>DESCRIPTION</th>
-                  <th style={{padding:'10px 14px',textAlign:'right',fontSize:11}}>HEURES</th>
-                  <th style={{padding:'10px 14px',textAlign:'right',fontSize:11}}>TARIF</th>
-                  <th style={{padding:'10px 14px',textAlign:'right',fontSize:11}}>MONTANT</th>
+              <table style={{width:'100%',borderCollapse:'collapse',marginBottom:16}}>
+                <thead><tr style={{background:'#1A1916',color:'#fff'}}>
+                  <th style={{padding:'9px 12px',textAlign:'left',fontSize:10,letterSpacing:'.05em'}}>DESCRIPTION</th>
+                  <th style={{padding:'9px 12px',textAlign:'right',fontSize:10}}>QTÉ</th>
+                  <th style={{padding:'9px 12px',textAlign:'right',fontSize:10}}>TARIF</th>
+                  <th style={{padding:'9px 12px',textAlign:'right',fontSize:10}}>MONTANT</th>
                 </tr></thead>
                 <tbody>
                   {(pdfInvoice.items||[]).map((item,i)=>(
                     <tr key={i} style={{borderBottom:'1px solid #E0DED8'}}>
-                      <td style={{padding:'10px 14px',fontSize:12}}>{item.service||item.task}</td>
-                      <td style={{padding:'10px 14px',textAlign:'right',fontSize:12,fontFamily:'monospace'}}>{Number(item.qty||item.duration||0).toFixed(2)}</td>
-                      <td style={{padding:'10px 14px',textAlign:'right',fontSize:12,fontFamily:'monospace'}}>{Number(item.rate||0).toFixed(2)} €</td>
-                      <td style={{padding:'10px 14px',textAlign:'right',fontSize:12,fontWeight:600,fontFamily:'monospace'}}>{(Number(item.qty||item.duration||0)*Number(item.rate||0)).toFixed(2)} €</td>
+                      <td style={{padding:'9px 12px',fontSize:11}}>{item.service||item.task}</td>
+                      <td style={{padding:'9px 12px',textAlign:'right',fontSize:11,fontFamily:'monospace'}}>{Number(item.qty||item.duration||0).toFixed(2)} {item.unit||'h'}</td>
+                      <td style={{padding:'9px 12px',textAlign:'right',fontSize:11,fontFamily:'monospace'}}>{Number(item.rate||0).toFixed(2)} €</td>
+                      <td style={{padding:'9px 12px',textAlign:'right',fontSize:11,fontWeight:600,fontFamily:'monospace'}}>{(Number(item.qty||item.duration||0)*Number(item.rate||0)).toFixed(2)} €</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               <div style={{display:'flex',justifyContent:'flex-end'}}>
-                <div style={{width:220,borderTop:'2px solid #1A1916',paddingTop:12}}>
-                  <div style={{display:'flex',justifyContent:'space-between',fontSize:16,fontWeight:800}}>
+                <div style={{width:200,borderTop:'2px solid #1A1916',paddingTop:10}}>
+                  <div style={{display:'flex',justifyContent:'space-between',fontSize:15,fontWeight:800}}>
                     <span>TOTAL</span>
                     <span style={{color:'#1A6B4A',fontFamily:'monospace'}}>{Number(pdfInvoice.amount||0).toLocaleString('fr-FR',{minimumFractionDigits:2})} €</span>
                   </div>
                 </div>
               </div>
+              {visibleFields.av_bank!==false&&avData?.bank_details&&(
+                <div style={{marginTop:20,padding:'12px 14px',background:'#F8F7F4',borderRadius:8}}>
+                  <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'#A8A5A0',marginBottom:6}}>COORDONNÉES BANCAIRES</div>
+                  <div style={{fontSize:11,fontFamily:'monospace',color:'#6B6963',lineHeight:1.7,whiteSpace:'pre-line'}}>{avData.bank_details}</div>
+                </div>
+              )}
             </div>
           </Card>
         </div>
@@ -1318,79 +1407,140 @@ const Invoices=({T})=>{
       {showForm&&(
         <Card accent T={T} style={{marginBottom:20}} className="fade-up">
           <div style={{fontWeight:700,marginBottom:18,fontSize:15,color:T.text}}>Nouvelle facture</div>
-          <div className="grid-2" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:20}}>
-            <div>
-              <label style={{fontSize:12,color:T.textMuted,fontWeight:500,display:'block',marginBottom:6}}>Client *</label>
-              <select value={form.clientId} onChange={e=>setForm({...form,clientId:e.target.value})}
-                style={{width:'100%',background:T.surfaceHigh,border:`1px solid ${T.border}`,borderRadius:8,padding:'9px 12px',color:T.text,fontSize:13}}>
-                {clients.map(c=><option key={c.id} value={c.id}>{c.name} — {c.rate}€/h</option>)}
-              </select>
-            </div>
-            <Input label="Date d'échéance" type="date" value={form.dueDate} onChange={v=>setForm({...form,dueDate:v})} T={T}/>
+
+          {/* Toggle mode */}
+          <div style={{display:'flex',gap:8,marginBottom:20}}>
+            {[{id:'hours',label:'Par heures (client existant)',icon:'◷'},{id:'free',label:'Libre (forfait, mission ponctuelle)',icon:'◈'}].map(m=>(
+              <button key={m.id} onClick={()=>setInvoiceMode(m.id)} style={{
+                flex:1,padding:'10px 14px',borderRadius:10,border:`1px solid ${invoiceMode===m.id?T.accent:T.border}`,
+                background:invoiceMode===m.id?T.accentLight:'transparent',
+                color:invoiceMode===m.id?T.accent:T.textMuted,fontSize:13,fontWeight:invoiceMode===m.id?600:400,
+                cursor:'pointer',fontFamily:'inherit',transition:'all .15s',textAlign:'left',
+              }}>
+                <span style={{marginRight:6}}>{m.icon}</span>{m.label}
+              </button>
+            ))}
           </div>
 
-          <div style={{marginBottom:16}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
-              <div style={{fontSize:12,color:T.textMuted,fontWeight:600}}>Heures non facturées — {client?.name}</div>
-              {sessions.length>0&&<button onClick={toggleAll} style={{fontSize:11,color:T.accent,background:'none',border:'none',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>{selectedSessions.length===sessions.length?'Tout décocher':'Tout cocher'}</button>}
+          {/* Infos communes */}
+          <div className="grid-2" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:16}}>
+            {invoiceMode==='hours'?(
+              <div>
+                <label style={{fontSize:12,color:T.textMuted,fontWeight:500,display:'block',marginBottom:6}}>Client *</label>
+                <select value={form.clientId} onChange={e=>setForm({...form,clientId:e.target.value})}
+                  style={{width:'100%',background:T.surfaceHigh,border:`1px solid ${T.border}`,borderRadius:8,padding:'9px 12px',color:T.text,fontSize:13}}>
+                  {clients.map(c=><option key={c.id} value={c.id}>{c.name} — {c.rate}€/h</option>)}
+                </select>
+              </div>
+            ):(
+              <Input label="Nom du client *" value={form.freeClientName} onChange={v=>setForm({...form,freeClientName:v})} placeholder="Jean Martin" T={T}/>
+            )}
+            <Input label="Date d'échéance" type="date" value={form.dueDate} onChange={v=>setForm({...form,dueDate:v})} T={T}/>
+            {invoiceMode==='free'&&(
+              <Input label="Email client (pour envoi)" value={form.freeClientEmail} onChange={v=>setForm({...form,freeClientEmail:v})} placeholder="jean@email.com" T={T}/>
+            )}
+          </div>
+
+          {/* MODE HEURES */}
+          {invoiceMode==='hours'&&(
+            <div style={{marginBottom:16}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+                <div style={{fontSize:12,color:T.textMuted,fontWeight:600}}>Heures non facturées — {client?.name}</div>
+                {sessions.length>0&&<button onClick={toggleAll} style={{fontSize:11,color:T.accent,background:'none',border:'none',cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>{selectedSessions.length===sessions.length?'Tout décocher':'Tout cocher'}</button>}
+              </div>
+              {loadingSessions?<div style={{padding:16,display:'flex',justifyContent:'center'}}><Spinner T={T}/></div>
+              :sessions.length===0
+                ?<div style={{padding:'12px 16px',background:T.surfaceHigh,borderRadius:8,fontSize:13,color:T.textDim,textAlign:'center'}}>Aucune heure non facturée pour ce client. Utilise le Timer pour en ajouter.</div>
+                :(
+                  <div style={{border:`1px solid ${T.border}`,borderRadius:10,overflow:'hidden'}}>
+                    {sessions.map((s,i)=>{
+                      const checked=selectedSessions.includes(s.id)
+                      const amount=Number(s.duration)*(client?.rate||0)
+                      return(
+                        <div key={s.id} onClick={()=>toggleSession(s.id)} style={{display:'flex',alignItems:'center',gap:12,padding:'11px 14px',borderBottom:i<sessions.length-1?`1px solid ${T.border}`:'none',cursor:'pointer',background:checked?T.accentLight:'transparent',transition:'background .12s'}}>
+                          <div style={{width:18,height:18,borderRadius:5,border:`1.5px solid ${checked?T.accent:T.border}`,background:checked?T.accent:'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .15s'}}>
+                            {checked&&<span style={{fontSize:10,color:T.accentText,fontWeight:700}}>✓</span>}
+                          </div>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:13,fontWeight:500,color:T.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.task||'Tâche sans titre'}</div>
+                            <div style={{fontSize:11,color:T.textMuted,marginTop:1}}>{s.date}</div>
+                          </div>
+                          <div style={{textAlign:'right',flexShrink:0}}>
+                            <div className="mono" style={{fontSize:13,color:T.accent,fontWeight:500}}>{s.duration}h</div>
+                            <div className="mono" style={{fontSize:11,color:T.textMuted}}>{amount.toFixed(2)} €</div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              }
+              {selectedSessions.length>0&&(
+                <div style={{marginTop:10,padding:'10px 14px',background:T.accentLight,border:`1px solid ${T.accent}30`,borderRadius:8,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span style={{fontSize:12,color:T.accent,fontWeight:600}}>{selectedSessions.length} session(s) · {hoursTotal.toFixed(2)}h · {client?.rate}€/h</span>
+                  <span className="mono" style={{fontSize:14,color:T.accent,fontWeight:700}}>{hoursAmount.toFixed(2)} €</span>
+                </div>
+              )}
             </div>
-            {loadingSessions?<div style={{padding:16,display:'flex',justifyContent:'center'}}><Spinner T={T}/></div>
-            :sessions.length===0?<div style={{padding:'12px 16px',background:T.surfaceHigh,borderRadius:8,fontSize:13,color:T.textDim,textAlign:'center'}}>Aucune heure non facturée pour ce client.</div>
-            :(
-              <div style={{border:`1px solid ${T.border}`,borderRadius:10,overflow:'hidden'}}>
-                {sessions.map((s,i)=>{
-                  const checked=selectedSessions.includes(s.id)
-                  const amount=Number(s.duration)*(client?.rate||0)
+          )}
+
+          {/* MODE LIBRE */}
+          {invoiceMode==='free'&&(
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:12,color:T.textMuted,fontWeight:600,marginBottom:10}}>Lignes de prestation</div>
+              <div style={{background:T.surfaceHigh,borderRadius:10,overflow:'hidden',marginBottom:10}}>
+                <div style={{display:'grid',gridTemplateColumns:'2fr 90px 110px 100px 36px',gap:8,padding:'8px 12px',borderBottom:`1px solid ${T.border}`}}>
+                  {['Description','Qté','Prix unit.','Unité',''].map(h=>(
+                    <div key={h} style={{fontSize:10,color:T.textDim,fontWeight:600,textTransform:'uppercase',letterSpacing:'.04em'}}>{h}</div>
+                  ))}
+                </div>
+                {freeItems.map((item,i)=>{
+                  const lineTotal=Number(item.qty||0)*Number(item.rate||0)
                   return(
-                    <div key={s.id} onClick={()=>toggleSession(s.id)} style={{display:'flex',alignItems:'center',gap:12,padding:'11px 14px',borderBottom:i<sessions.length-1?`1px solid ${T.border}`:'none',cursor:'pointer',background:checked?T.accentLight:'transparent',transition:'background .12s'}}>
-                      <div style={{width:18,height:18,borderRadius:5,border:`1.5px solid ${checked?T.accent:T.border}`,background:checked?T.accent:'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .15s'}}>
-                        {checked&&<span style={{fontSize:10,color:T.accentText,fontWeight:700}}>✓</span>}
+                    <div key={i} style={{display:'grid',gridTemplateColumns:'2fr 90px 110px 100px 36px',gap:8,padding:'8px 12px',borderBottom:i<freeItems.length-1?`1px solid ${T.border}`:'none',alignItems:'center'}}>
+                      <input value={item.service} onChange={e=>updateFreeItem(i,'service',e.target.value)} placeholder="Ex: Mise en page 30 docs"
+                        style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:7,padding:'7px 10px',color:T.text,fontSize:13}}/>
+                      <input type="number" value={item.qty||''} onChange={e=>updateFreeItem(i,'qty',e.target.value)} placeholder="1"
+                        style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:7,padding:'7px 8px',color:T.text,fontSize:13,textAlign:'center'}}/>
+                      <div style={{position:'relative'}}>
+                        <input type="number" value={item.rate||''} onChange={e=>updateFreeItem(i,'rate',e.target.value)} placeholder="25"
+                          style={{width:'100%',background:T.surface,border:`1px solid ${T.border}`,borderRadius:7,padding:'7px 24px 7px 10px',color:T.text,fontSize:13}}/>
+                        <span style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',fontSize:11,color:T.textDim}}>€</span>
                       </div>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:13,fontWeight:500,color:T.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.task||'Tâche sans titre'}</div>
-                        <div style={{fontSize:11,color:T.textMuted,marginTop:1}}>{s.date}</div>
-                      </div>
-                      <div style={{textAlign:'right',flexShrink:0}}>
-                        <div className="mono" style={{fontSize:13,color:T.accent,fontWeight:500}}>{s.duration}h</div>
-                        <div className="mono" style={{fontSize:11,color:T.textMuted}}>{amount.toFixed(2)} €</div>
-                      </div>
+                      <select value={item.unit||'forfait'} onChange={e=>updateFreeItem(i,'unit',e.target.value)}
+                        style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:7,padding:'7px 8px',color:T.text,fontSize:12}}>
+                        <option value="forfait">Forfait</option>
+                        <option value="h">/ heure</option>
+                        <option value="page">/ page</option>
+                        <option value="doc">/ doc</option>
+                        <option value="mot">/ mot</option>
+                        <option value="unité">/ unité</option>
+                      </select>
+                      <button onClick={()=>setFreeItems(e=>e.filter((_,j)=>j!==i))} disabled={freeItems.length===1}
+                        style={{background:'none',border:'none',color:freeItems.length===1?T.textDim:T.danger,cursor:freeItems.length===1?'not-allowed':'pointer',fontSize:14,padding:4}}>✕</button>
                     </div>
                   )
                 })}
               </div>
-            )}
-            {selectedSessions.length>0&&(
-              <div style={{marginTop:10,padding:'10px 14px',background:T.accentLight,border:`1px solid ${T.accent}30`,borderRadius:8,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                <span style={{fontSize:12,color:T.accent,fontWeight:600}}>{selectedSessions.length} session(s) · {hoursTotal.toFixed(2)}h · {client?.rate}€/h</span>
-                <span className="mono" style={{fontSize:14,color:T.accent,fontWeight:700}}>{hoursAmount.toFixed(2)} €</span>
-              </div>
-            )}
-          </div>
+              <Btn small variant="subtle" onClick={addFreeItem} T={T}>+ Ajouter une ligne</Btn>
+            </div>
+          )}
 
-          <div style={{marginBottom:16}}>
-            <div style={{fontSize:12,color:T.textMuted,fontWeight:600,marginBottom:8}}>Prestations supplémentaires (optionnel)</div>
-            {extraItems.map((item,i)=>(
-              <div key={i} style={{display:'grid',gridTemplateColumns:'2fr 70px 110px 36px',gap:8,marginBottom:8,alignItems:'center'}}>
-                <select value={item.service} onChange={e=>updateExtra(i,'service',e.target.value)} style={{background:T.surfaceHigh,border:`1px solid ${T.border}`,borderRadius:8,padding:'8px 12px',color:item.service?T.text:T.textDim,fontSize:13}}>
-                  <option value="">Choisir service...</option>
-                  {VA_SERVICES.map(s=><option key={s}>{s}</option>)}
-                </select>
-                <input type="number" placeholder="Qté" value={item.qty} onChange={e=>updateExtra(i,'qty',e.target.value)} style={{background:T.surfaceHigh,border:`1px solid ${T.border}`,borderRadius:8,padding:'8px 10px',color:T.text,fontSize:13,textAlign:'center'}}/>
-                <input type="number" placeholder="Tarif €" value={item.rate||''} onChange={e=>updateExtra(i,'rate',e.target.value)} style={{background:T.surfaceHigh,border:`1px solid ${T.border}`,borderRadius:8,padding:'8px 12px',color:T.text,fontSize:13}}/>
-                <button onClick={()=>setExtraItems(e=>e.filter((_,j)=>j!==i))} style={{background:T.surfaceHigh,border:`1px solid ${T.border}`,borderRadius:8,color:T.danger,cursor:'pointer',padding:'8px',fontSize:12}}>✕</button>
-              </div>
-            ))}
-            <Btn small variant="subtle" onClick={addExtraItem} T={T}>+ Ligne</Btn>
-          </div>
-
+          {/* TOTAL + ACTIONS */}
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',borderTop:`1px solid ${T.border}`,paddingTop:16}}>
             <div>
-              <div className="mono" style={{fontSize:20,fontWeight:600,color:T.text}}>Total : <span style={{color:T.accent}}>{grandTotal.toFixed(2)} €</span></div>
-              {selectedSessions.length>0&&<div style={{fontSize:11,color:T.textMuted,marginTop:3}}>{hoursTotal.toFixed(2)}h × {client?.rate}€/h {extraAmount>0?`+ ${extraAmount.toFixed(2)}€`:''}</div>}
+              <div className="mono" style={{fontSize:20,fontWeight:600,color:T.text}}>
+                Total : <span style={{color:T.accent}}>{grandTotal.toFixed(2)} €</span>
+              </div>
+              {invoiceMode==='hours'&&selectedSessions.length>0&&(
+                <div style={{fontSize:11,color:T.textMuted,marginTop:3}}>{hoursTotal.toFixed(2)}h × {client?.rate}€/h</div>
+              )}
             </div>
             <div style={{display:'flex',gap:10}}>
-              <Btn onClick={create} loading={saving} disabled={!form.clientId||(selectedSessions.length===0&&extraItems.length===0)} T={T}>Créer la facture</Btn>
-              <Btn variant="ghost" onClick={()=>{setShowForm(false);setSelectedSessions([]);setExtraItems([])}} T={T}>Annuler</Btn>
+              <Btn onClick={create} loading={saving}
+                disabled={invoiceMode==='hours'?(!form.clientId||selectedSessions.length===0):(!form.freeClientName||freeTotal===0)}
+                T={T}>Créer la facture</Btn>
+              <Btn variant="ghost" onClick={()=>{setShowForm(false);setSelectedSessions([]);setFreeItems([{service:'',qty:1,rate:0,unit:'forfait'}])}} T={T}>Annuler</Btn>
             </div>
           </div>
         </Card>
