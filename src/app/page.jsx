@@ -271,14 +271,21 @@ const NAV=[
   {id:'settings',label:'Paramètres',icon:'⊙'},
 ]
 
-const Sidebar=({page,setPage,user,onSignOut,T})=>(
+const Sidebar=({page,setPage,user,onSignOut,T})=>{
+  const[tooltip,setTooltip]=useState(null)
+  return(
   <div className="sidebar" style={{width:220,background:T.sidebar,borderRight:`1px solid ${T.sidebar==='#1A1916'?'#2A2A27':'#25262A'}`,height:'100vh',position:'sticky',top:0,display:'flex',flexDirection:'column',flexShrink:0,zIndex:10}}>
+    {tooltip&&(
+      <div style={{position:'fixed',left:tooltip.x,top:tooltip.y,background:'#1A1916',color:'#E8FF6B',fontSize:11,fontWeight:700,padding:'5px 11px',borderRadius:7,zIndex:99999,pointerEvents:'none',whiteSpace:'nowrap',boxShadow:'0 4px 14px rgba(0,0,0,0.35)',border:'1px solid #E8FF6B30'}}>
+        {tooltip.text}
+      </div>
+    )}
     <div style={{padding:'20px 18px 16px',borderBottom:'1px solid #2A2A27'}}>
       <div style={{display:'flex',alignItems:'center',gap:10}}>
         <div style={{width:32,height:32,borderRadius:8,background:'#E8FF6B',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
           <span style={{fontWeight:800,fontSize:13,color:'#1A1916'}}>VA</span>
         </div>
-        <div>
+        <div className="desktop-only">
           <div style={{fontSize:16,fontWeight:800,color:'#ECEAE3',letterSpacing:'-0.3px'}}>Billing</div>
           <div style={{fontSize:10,color:'#7A7870',marginTop:1}}>Espace facturation</div>
         </div>
@@ -286,22 +293,26 @@ const Sidebar=({page,setPage,user,onSignOut,T})=>(
     </div>
     <nav className="sidebar-nav" style={{flex:1,padding:'10px 8px',overflowY:'auto',display:'flex',flexDirection:'column'}}>
       {NAV.map(n=>(
-        <div key={n.id} onClick={()=>setPage(n.id)} style={{
-          display:'flex',alignItems:'center',gap:9,padding:'9px 12px',borderRadius:8,
-          marginBottom:1,cursor:'pointer',fontSize:13,transition:'all .12s',
-          background:page===n.id?'#E8FF6B18':'transparent',
-          color:page===n.id?'#E8FF6B':'#7A7870',fontWeight:page===n.id?600:400,
-        }}
-          onMouseEnter={e=>{if(page!==n.id){e.currentTarget.style.background='#FFFFFF0A';e.currentTarget.style.color='#ECEAE3'}}}
-          onMouseLeave={e=>{if(page!==n.id){e.currentTarget.style.background='transparent';e.currentTarget.style.color='#7A7870'}}}
+        <div key={n.id}
+          onClick={()=>setPage(n.id)}
+          onMouseEnter={e=>{
+            const rect=e.currentTarget.getBoundingClientRect()
+            setTooltip({text:n.label,x:rect.right+10,y:rect.top+(rect.height/2)-12})
+            if(page!==n.id){e.currentTarget.style.background='#FFFFFF0A';e.currentTarget.style.color='#ECEAE3'}
+          }}
+          onMouseLeave={e=>{
+            setTooltip(null)
+            if(page!==n.id){e.currentTarget.style.background='transparent';e.currentTarget.style.color='#7A7870'}
+          }}
+          style={{display:'flex',alignItems:'center',gap:9,padding:'9px 12px',borderRadius:8,marginBottom:1,cursor:'pointer',fontSize:13,transition:'all .12s',background:page===n.id?'#E8FF6B18':'transparent',color:page===n.id?'#E8FF6B':'#7A7870',fontWeight:page===n.id?600:400}}
         >
-          <span style={{fontSize:14,opacity:.8}}>{n.icon}</span>
+          <span style={{fontSize:14,opacity:.8,flexShrink:0}}>{n.icon}</span>
           <span className="desktop-only">{n.label}</span>
         </div>
       ))}
     </nav>
-    <div className="sidebar-footer" style={{padding:'14px 16px',borderTop:'1px solid #2A2A27'}}>
-      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
+    <div style={{padding:'14px 16px',borderTop:'1px solid #2A2A27'}}>
+      <div className="desktop-only" style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
         <div style={{width:30,height:30,borderRadius:'50%',background:'#E8FF6B20',border:'1.5px solid #E8FF6B40',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:12,color:'#E8FF6B',flexShrink:0}}>
           {(user?.email||'?')[0].toUpperCase()}
         </div>
@@ -310,13 +321,26 @@ const Sidebar=({page,setPage,user,onSignOut,T})=>(
           <div style={{fontSize:10,color:'#7A7870',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user?.email}</div>
         </div>
       </div>
-      <button onClick={onSignOut} style={{width:'100%',background:'transparent',border:'1px solid #2A2A27',borderRadius:8,padding:'7px',fontSize:12,color:'#7A7870',cursor:'pointer',fontFamily:'inherit',transition:'all .15s'}}
-        onMouseEnter={e=>{e.currentTarget.style.borderColor='#FF5F5750';e.currentTarget.style.color='#FF5F57'}}
-        onMouseLeave={e=>{e.currentTarget.style.borderColor='#2A2A27';e.currentTarget.style.color='#7A7870'}}
-      >Déconnexion</button>
+      {/* Toujours visible — desktop et mobile */}
+      <button onClick={onSignOut} title="Se déconnecter"
+        onMouseEnter={e=>{
+          e.currentTarget.style.borderColor='#FF5F5750';e.currentTarget.style.color='#FF5F57'
+          const rect=e.currentTarget.getBoundingClientRect()
+          setTooltip({text:'Se déconnecter',x:rect.right+10,y:rect.top+(rect.height/2)-12})
+        }}
+        onMouseLeave={e=>{
+          e.currentTarget.style.borderColor='#2A2A27';e.currentTarget.style.color='#7A7870'
+          setTooltip(null)
+        }}
+        style={{width:'100%',background:'transparent',border:'1px solid #2A2A27',borderRadius:8,padding:'7px',fontSize:12,color:'#7A7870',cursor:'pointer',fontFamily:'inherit',transition:'all .15s',display:'flex',alignItems:'center',justifyContent:'center',gap:6}}
+      >
+        <span style={{fontSize:14}}>⏻</span>
+        <span className="desktop-only">Déconnexion</span>
+      </button>
     </div>
   </div>
-)
+  )
+}
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 const Dashboard=({setPage,user,T})=>{
@@ -968,40 +992,46 @@ const generatePDF = (invoice, client, settings, visibleFields) => {
   const show = (key) => visibleFields[key] !== false
 
   const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/>
+<title>Facture ${invoice.invoice_number}</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
   body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:13px;color:#1A1916;background:#FFFFFF;padding:48px}
-  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:48px;padding-bottom:24px;border-bottom:2px solid #1A1916}
-  .logo{font-size:28px;font-weight:800;letter-spacing:-1px;color:#1A1916}
+  /* Masquer TOUT ce que le navigateur ajoute en impression */
+  @media print{
+    @page{margin:0;size:A4}
+    body{padding:32px 40px}
+    html{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  }
+  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:44px;padding-bottom:22px;border-bottom:2px solid #1A1916}
+  .logo{font-size:26px;font-weight:800;letter-spacing:-1px;color:#1A1916}
   .logo span{color:#1A6B4A}
   .invoice-title{text-align:right}
-  .invoice-title h1{font-size:32px;font-weight:800;letter-spacing:-1px;color:#1A1916;margin-bottom:4px}
-  .invoice-title .num{font-size:14px;font-weight:500;color:#6B6963;font-family:monospace}
-  .parties{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-bottom:40px}
-  .party-label{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#A8A5A0;margin-bottom:10px}
-  .party-name{font-size:16px;font-weight:700;color:#1A1916;margin-bottom:4px}
+  .invoice-title h1{font-size:30px;font-weight:800;letter-spacing:-1px;color:#1A1916;margin-bottom:4px}
+  .invoice-title .num{font-size:13px;font-weight:500;color:#6B6963;font-family:monospace}
+  .parties{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-bottom:36px}
+  .party-label{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#A8A5A0;margin-bottom:8px}
+  .party-name{font-size:15px;font-weight:700;color:#1A1916;margin-bottom:4px}
   .party-detail{font-size:12px;color:#6B6963;line-height:1.7}
-  .dates{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;background:#F8F7F4;border-radius:10px;padding:18px;margin-bottom:32px}
+  .dates{display:grid;grid-template-columns:1fr 1fr;gap:16px;background:#F8F7F4;border-radius:10px;padding:16px 18px;margin-bottom:30px}
   .date-item label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#A8A5A0;display:block;margin-bottom:4px}
   .date-item span{font-size:14px;font-weight:600;color:#1A1916}
-  table{width:100%;border-collapse:collapse;margin-bottom:24px}
+  table{width:100%;border-collapse:collapse;margin-bottom:22px}
   thead tr{background:#1A1916;color:#FFFFFF}
-  thead th{padding:12px 16px;text-align:left;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+  thead th{padding:11px 14px;text-align:left;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
   thead th:last-child{text-align:right}
   tbody tr{border-bottom:1px solid #E0DED8}
   tbody tr:last-child{border-bottom:none}
-  tbody td{padding:13px 16px;font-size:13px;color:#1A1916}
+  tbody td{padding:12px 14px;font-size:13px;color:#1A1916}
   tbody td:last-child{text-align:right;font-weight:600;font-family:monospace}
-  .totals{display:flex;justify-content:flex-end;margin-bottom:40px}
+  .totals{display:flex;justify-content:flex-end;margin-bottom:36px}
   .totals-box{width:280px}
   .total-row{display:flex;justify-content:space-between;padding:8px 0;font-size:13px;color:#6B6963;border-bottom:1px solid #E0DED8}
   .total-row.grand{border-bottom:none;padding-top:14px;margin-top:4px;font-size:18px;font-weight:800;color:#1A1916;border-top:2px solid #1A1916}
   .total-row.grand span:last-child{color:#1A6B4A;font-family:monospace}
-  .payment{background:#F8F7F4;border-radius:10px;padding:20px;margin-bottom:32px}
-  .payment h3{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#A8A5A0;margin-bottom:10px}
-  .payment p{font-size:13px;color:#6B6963;line-height:1.7}
-  .status-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700}
-  .footer{border-top:1px solid #E0DED8;padding-top:20px;text-align:center;font-size:11px;color:#A8A5A0;line-height:1.8}
+  .payment{background:#F8F7F4;border-radius:10px;padding:18px 20px;margin-bottom:30px}
+  .payment h3{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#A8A5A0;margin-bottom:8px}
+  .payment p{font-size:12px;color:#6B6963;line-height:1.8;font-family:monospace}
+  .footer{border-top:1px solid #E0DED8;padding-top:18px;text-align:center;font-size:11px;color:#A8A5A0;line-height:1.8}
 </style></head><body>
   <div class="header">
     <div class="logo"><span>VA</span>Billing</div>
@@ -1023,10 +1053,10 @@ const generatePDF = (invoice, client, settings, visibleFields) => {
     </div>
     <div>
       <div class="party-label">Client</div>
-      ${show('client_name')?`<div class="party-name">${client?.name||''}</div>`:''}
+      ${show('client_name')?`<div class="party-name">${client?.name||invoice.free_client_name||''}</div>`:''}
       <div class="party-detail">
         ${show('client_company')&&client?.company?`${client.company}<br/>`:''}
-        ${show('client_email')&&client?.email?`${client.email}<br/>`:''}
+        ${show('client_email')&&(client?.email||invoice.free_client_email)?`${client?.email||invoice.free_client_email}<br/>`:''}
         ${show('client_phone')&&client?.phone?`Tél : ${client.phone}<br/>`:''}
         ${show('client_vat')&&client?.vat_id?`TVA : ${client.vat_id}<br/>`:''}
       </div>
@@ -1035,15 +1065,13 @@ const generatePDF = (invoice, client, settings, visibleFields) => {
 
   <div class="dates">
     <div class="date-item"><label>Date d'émission</label><span>${invoice.date||new Date().toLocaleDateString('fr-FR')}</span></div>
-    <div class="date-item"><label>Échéance</label><span>${invoice.due_date||'—'}</span></div>
-    <div class="date-item"><label>Statut</label><span>${invoice.status}</span></div>
+    <div class="date-item"><label>Date d'échéance</label><span>${invoice.due_date||'—'}</span></div>
   </div>
 
   <table>
     <thead><tr>
       <th>Description</th>
-      <th>Date</th>
-      <th style="text-align:right">Qté / Heures</th>
+      <th style="text-align:right">Qté</th>
       <th style="text-align:right">Tarif unitaire</th>
       <th style="text-align:right">Montant</th>
     </tr></thead>
@@ -1051,8 +1079,7 @@ const generatePDF = (invoice, client, settings, visibleFields) => {
       ${(invoice.items||[]).map(item=>`
       <tr>
         <td>${item.service||item.task||'Prestation'}</td>
-        <td style="color:#6B6963;font-size:12px">${item.date||'—'}</td>
-        <td style="text-align:right;font-family:monospace">${Number(item.qty||item.duration||0).toFixed(2)}</td>
+        <td style="text-align:right;font-family:monospace">${Number(item.qty||item.duration||0).toFixed(2)} ${item.unit||'h'}</td>
         <td style="text-align:right;font-family:monospace">${fmt(item.rate)} €</td>
         <td>${fmt(Number(item.qty||item.duration||0)*Number(item.rate||0))} €</td>
       </tr>`).join('')}
@@ -1061,24 +1088,36 @@ const generatePDF = (invoice, client, settings, visibleFields) => {
 
   <div class="totals">
     <div class="totals-box">
-      <div class="total-row"><span>Sous-total HT</span><span class="mono">${fmt(invoice.amount)} €</span></div>
+      <div class="total-row"><span>Sous-total HT</span><span>${fmt(invoice.amount)} €</span></div>
       ${settings?.tva_number?`<div class="total-row"><span>TVA (0%)</span><span>0,00 €</span></div>`:''}
       <div class="total-row grand"><span>TOTAL TTC</span><span>${fmt(invoice.amount)} €</span></div>
     </div>
   </div>
 
-  ${settings?.bank_details?`<div class="payment"><h3>Coordonnées bancaires</h3><p class="mono">${settings.bank_details.replace(/\n/g,'<br/>')}</p></div>`:''}
+  ${show('av_bank')&&settings?.bank_details?`<div class="payment"><h3>Coordonnées bancaires</h3><p>${settings.bank_details.replace(/\n/g,'<br/>')}</p></div>`:''}
 
   <div class="footer">
     ${settings?.full_name||''} ${settings?.siret?`· SIRET ${settings.siret}`:''} ${settings?.tva_number?`· TVA ${settings.tva_number}`:''}<br/>
     Merci pour votre confiance.
   </div>
+  <script>
+    // Déclencher l'impression automatiquement puis fermer l'onglet
+    window.onload=function(){
+      setTimeout(function(){
+        window.print()
+        // Fermer après impression (fonctionne sur Chrome/Edge)
+        setTimeout(function(){window.close()},500)
+      },300)
+    }
+  </script>
 </body></html>`
 
-  const win = window.open('','_blank')
-  win.document.write(html)
-  win.document.close()
-  setTimeout(()=>win.print(),500)
+  // Ouvrir dans un nouvel onglet propre sans barre de navigation
+  const win = window.open('','_blank','width=900,height=700,menubar=no,toolbar=no,location=no,status=no')
+  if(win){
+    win.document.write(html)
+    win.document.close()
+  }
 }
 
 // ─── INVOICES ─────────────────────────────────────────────────────────────────
@@ -1353,8 +1392,8 @@ const Invoices=({T})=>{
                   </div>
                 </div>
               </div>
-              <div style={{background:'#F8F7F4',borderRadius:8,padding:'12px 14px',display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:20}}>
-                {[['Date',pdfInvoice.date||new Date().toLocaleDateString('fr')],['Échéance',pdfInvoice.due_date||'—'],['Statut',pdfInvoice.status]].map(([label,val])=>(
+              <div style={{background:'#F8F7F4',borderRadius:8,padding:'12px 14px',display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:10,marginBottom:20}}>
+                {[['Date',pdfInvoice.date||new Date().toLocaleDateString('fr')],['Échéance',pdfInvoice.due_date||'—']].map(([label,val])=>(
                   <div key={label}><div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'#A8A5A0',marginBottom:2}}>{label}</div><div style={{fontSize:12,fontWeight:600}}>{val}</div></div>
                 ))}
               </div>
@@ -1937,7 +1976,17 @@ const Settings=({user,T,theme,setTheme})=>{
 
   const save=async()=>{
     setSaving(true)
-    const{error}=await supabase.from('settings').update({...profile,...reminders,updated_at:new Date().toISOString()}).eq('user_id',user.id)
+    // upsert = insert si n'existe pas, update si existe déjà
+    const{error}=await supabase.from('settings').upsert({
+      user_id:user.id,
+      full_name:profile.full_name,
+      siret:profile.siret,
+      tva_number:profile.tva_number,
+      bank_details:profile.bank_details,
+      reminder_before:reminders.reminder_before,
+      reminder_after:reminders.reminder_after,
+      updated_at:new Date().toISOString()
+    },{onConflict:'user_id'})
     if(error)notify(error.message,'error')
     else notify('Paramètres sauvegardés !')
     setSaving(false)
