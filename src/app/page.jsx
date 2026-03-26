@@ -2013,7 +2013,7 @@ export default function App(){
   if(user===undefined) return (
     <div style={{minHeight:'100vh',background:T.bg,display:'flex',alignItems:'center',justifyContent:'center'}}>
       <div style={{width:16,height:16,border:`2px solid ${T.border}`,borderTopColor:T.accent,borderRadius:'50%',animation:'spin .6s linear infinite'}}/>
-      {null}
+      <style jsx>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   )
   
