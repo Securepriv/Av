@@ -81,24 +81,29 @@ input,textarea,select,button{font-family:'Plus Jakarta Sans',sans-serif;outline:
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 .fade-up{animation:fadeUp .3s cubic-bezier(.22,1,.36,1) both}
 .s1{animation-delay:.04s}.s2{animation-delay:.08s}.s3{animation-delay:.12s}.s4{animation-delay:.16s}
+@media(max-width:1024px){
+.sidebar{width:80px!important}
+.sidebar-nav div span:last-child{display:none}
+.sidebar-footer div:last-child{display:none}
+}
 @media(max-width:768px){
 .desktop-only{display:none!important}
-.sidebar{width:100%!important;height:auto!important;position:relative!important;flex-direction:row!important;align-items:center!important;padding:10px 16px!important;overflow-x:auto!important}
-.sidebar-nav{flex-direction:row!important;padding:0!important;gap:4px!important}
+.sidebar{width:100%!important;height:60px!important;position:fixed!important;bottom:0!important;top:auto!important;flex-direction:row!important;align-items:center!important;padding:8px!important;overflow-x:auto!important;z-index:1000!important}
+.sidebar-nav{flex-direction:row!important;padding:0!important;gap:8px!important}
 .sidebar-footer{display:none!important}
-.main-content{padding:16px!important}
+.main-content{padding:16px!important;padding-bottom:80px!important}
 .grid-2{grid-template-columns:1fr!important}
 .grid-3{grid-template-columns:1fr!important}
 .grid-4{grid-template-columns:1fr 1fr!important}
 .stats-grid{grid-template-columns:1fr 1fr!important}
 .app-layout{flex-direction:column!important}
 .page-header{flex-direction:column!important;align-items:flex-start!important;gap:12px!important}
+.invoice-table{display:none!important}
+.invoice-cards{display:flex!important}
 }
 @media(max-width:480px){
 .grid-4{grid-template-columns:1fr!important}
 .stats-grid{grid-template-columns:1fr!important}
-.invoice-table{display:none!important}
-.invoice-cards{display:flex!important}
 }
 `
 
@@ -215,11 +220,14 @@ const AuthPage = ({ onAuth }) => {
       <div className="fade-up" style={{ width: '100%', maxWidth: 420 }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: '#1A1916', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span style={{ color: '#E8FF6B', fontWeight: 800, fontSize: 14 }}>VA<span style={{ fontSize: 20, fontWeight: 800, color: '#1A1916', letterSpacing: '-0.5px' }}>Billing</span></span>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: '#1A1916', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <span style={{ color: '#E8FF6B', fontWeight: 800, fontSize: 14 }}>VA</span>
+            </div>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontWeight: 800, fontSize: 18, color: '#1A1916', letterSpacing: '-0.5px' }}>Billing</div>
+              <div style={{ fontSize: 12, color: '#6B6963' }}>Espace facturation</div>
             </div>
           </div>
-          <div style={{ fontSize: 13, color: '#6B6963' }}>Facturation pensée pour les assistantes virtuelles</div>
         </div>
         <div style={{ background: '#FFFFFF', border: '1px solid #E0DED8', borderRadius: 16, padding: '32px 28px', boxShadow: '0 4px 24px rgba(0,0,0,0.06)' }}>
           <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4, color: '#1A1916' }}>{mode === 'login' ? 'Bon retour 👋' : 'Créer un compte'}</h2>
@@ -297,7 +305,7 @@ const Sidebar = ({ page, setPage, user, onSignOut, T }) => {
             style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 12px', borderRadius: 8, marginBottom: 1, cursor: 'pointer', fontSize: 13, transition: 'all .12s', background: page === n.id ? '#E8FF6B18' : 'transparent', color: page === n.id ? '#E8FF6B' : '#7A7870', fontWeight: page === n.id ? 600 : 400 }}
           >
             <span style={{ fontSize: 16, opacity: .8 }}>{n.icon}</span>
-            {n.label}
+            <span>{n.label}</span>
           </div>
         ))}
       </div>
@@ -323,7 +331,7 @@ const Sidebar = ({ page, setPage, user, onSignOut, T }) => {
           }}
           style={{ width: '100%', background: 'transparent', border: '1px solid #2A2A27', borderRadius: 8, padding: '7px', fontSize: 12, color: '#7A7870', cursor: 'pointer', fontFamily: 'inherit', transition: 'all .15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
         >
-          <span>⏻</span>Déconnexion
+          <span>⏻</span><span>Déconnexion</span>
         </button>
       </div>
     </div>
@@ -776,12 +784,15 @@ const PaidWork = ({ T }) => {
   )
 }
 
-// ─── TIMER ──────────────────────────────────────────────────────────────────
+// ─── TIMER (avec Services Quotidiens) ──────────────────────────────────────────
 const Timer = ({ T, timerState, timerActions }) => {
   const { running, paused, seconds, clientId, task, clients, sessions } = timerState
   const { start, pause, resume, stop, setClientId, setTask, reloadSessions } = timerActions
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
+  const [showDailyForm, setShowDailyForm] = useState(false)
+  const [dailyServices, setDailyServices] = useState([])
+  const [dailyForm, setDailyForm] = useState({ clientId: '', service: '', rate: '', days: 1 })
 
   const notify = (msg, type = 'ok') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
 
@@ -811,6 +822,40 @@ const Timer = ({ T, timerState, timerActions }) => {
     reloadSessions()
   }
 
+  const loadDailyServices = useCallback(async () => {
+    const { data } = await supabase.from('daily_services').select('*,clients(name)').order('created_at', { ascending: false })
+    setDailyServices(data || [])
+  }, [])
+
+  useEffect(() => { loadDailyServices() }, [])
+
+  const saveDailyService = async () => {
+    if (!dailyForm.clientId || !dailyForm.service || !dailyForm.rate) {
+      notify('Tous les champs sont requis', 'error')
+      return
+    }
+    setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { error } = await supabase.from('daily_services').insert({
+      user_id: user.id,
+      client_id: dailyForm.clientId,
+      service: dailyForm.service,
+      rate: Number(dailyForm.rate),
+      days_per_month: Number(dailyForm.days),
+      date_added: new Date().toISOString().split('T')[0]
+    })
+    if (error) { notify(error.message, 'error') }
+    else { notify('Service quotidien ajouté !'); setShowDailyForm(false); loadDailyServices() }
+    setSaving(false)
+  }
+
+  const deleteDailyService = async (id) => {
+    if (!confirm('Supprimer ce service quotidien ?')) return
+    await supabase.from('daily_services').delete().eq('id', id)
+    notify('Service supprimé.')
+    loadDailyServices()
+  }
+
   const client = clients.find(c => c.id === clientId)
   const totalH = sessions.reduce((a, s) => a + Number(s.duration), 0).toFixed(1)
   const isActive = running && !paused
@@ -818,85 +863,143 @@ const Timer = ({ T, timerState, timerActions }) => {
   return (
     <div className="main-content" style={{ padding: '28px 32px' }}>
       <Toast msg={toast?.msg} type={toast?.type} T={T} />
-      <h1 className="fade-up" style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-0.5px', color: T.text, marginBottom: 28 }}>Timer & heures</h1>
-      <div className="fade-up grid-2" style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 20 }}>
-        <Card accent={isActive} T={T} style={{ position: 'relative', overflow: 'hidden' }}>
-          {running && (
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: T.border }}>
-              <div style={{ height: '100%', background: paused ? T.warning : T.accent, width: `${Math.min((seconds % 3600) / 3600 * 100, 100)}%`, transition: 'width 1s linear,background .3s' }} />
+      <h1 className="fade-up" style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-0.5px', color: T.text, marginBottom: 28 }}>Timer & Services Quotidiens</h1>
+      
+      {/* ── TABS ── */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        <button onClick={() => setShowDailyForm(false)} style={{ padding: '10px 20px', borderRadius: 8, border: `1px solid ${!showDailyForm ? T.accent : T.border}`, background: !showDailyForm ? T.accentLight : 'transparent', color: !showDailyForm ? T.accent : T.textMuted, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>⏱ Timer</button>
+        <button onClick={() => setShowDailyForm(true)} style={{ padding: '10px 20px', borderRadius: 8, border: `1px solid ${showDailyForm ? T.accent : T.border}`, background: showDailyForm ? T.accentLight : 'transparent', color: showDailyForm ? T.accent : T.textMuted, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>📋 Services par jours</button>
+      </div>
+
+      {!showDailyForm ? (
+        /* ── TIMER CARD ── */
+        <div className="fade-up grid-2" style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 20 }}>
+          <Card accent={isActive} T={T} style={{ position: 'relative', overflow: 'hidden' }}>
+            {running && (
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: T.border }}>
+                <div style={{ height: '100%', background: paused ? T.warning : T.accent, width: `${Math.min((seconds % 3600) / 3600 * 100, 100)}%`, transition: 'width 1s linear,background .3s' }} />
+              </div>
+            )}
+            <div style={{ textAlign: 'center', padding: '20px 0 22px' }}>
+              <div className="mono" style={{ fontSize: 54, fontWeight: 300, letterSpacing: 3, lineHeight: 1, transition: 'color .3s', color: isActive ? T.accent : paused ? T.warning : T.text, animation: isActive ? 'blink 2.5s ease infinite' : 'none' }}>
+                {fmt(seconds)}
+              </div>
+              <div style={{ marginTop: 12, minHeight: 28, display: 'flex', justifyContent: 'center' }}>
+                {running && client && (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: paused ? T.warningBg : T.dangerBg, border: `1px solid ${paused ? T.warning : T.danger}40`, borderRadius: 20, padding: '4px 14px', transition: 'all .3s' }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: paused ? T.warning : T.danger, animation: isActive ? 'blink .8s ease infinite' : 'none' }} />
+                    <span style={{ fontSize: 12, color: paused ? T.warning : T.danger, fontWeight: 600 }}>{paused ? 'En pause — ' : ''}{client.name}</span>
+                  </div>
+                )}
+              </div>
             </div>
-          )}
-          <div style={{ textAlign: 'center', padding: '20px 0 22px' }}>
-            <div className="mono" style={{ fontSize: 54, fontWeight: 300, letterSpacing: 3, lineHeight: 1, transition: 'color .3s', color: isActive ? T.accent : paused ? T.warning : T.text, animation: isActive ? 'blink 2.5s ease infinite' : 'none' }}>
-              {fmt(seconds)}
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: T.textMuted, fontWeight: 500, display: 'block', marginBottom: 6 }}>Client</label>
+              <select value={clientId} onChange={e => setClientId(e.target.value)} disabled={running}
+                style={{ width: '100%', background: T.surfaceHigh, border: `1px solid ${T.border}`, borderRadius: 8, padding: '9px 12px', color: T.text, fontSize: 13, cursor: running ? 'not-allowed' : 'pointer', opacity: running ? .7 : 1 }}>
+                {clients.map(c => <option key={c.id} value={c.id}>{c.name} — {c.rate}€/h</option>)}
+              </select>
             </div>
-            <div style={{ marginTop: 12, minHeight: 28, display: 'flex', justifyContent: 'center' }}>
-              {running && client && (
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: paused ? T.warningBg : T.dangerBg, border: `1px solid ${paused ? T.warning : T.danger}40`, borderRadius: 20, padding: '4px 14px', transition: 'all .3s' }}>
-                  <div style={{ width: 6, height: 6, borderRadius: '50%', background: paused ? T.warning : T.danger, animation: isActive ? 'blink .8s ease infinite' : 'none' }} />
-                  <span style={{ fontSize: 12, color: paused ? T.warning : T.danger, fontWeight: 600 }}>{paused ? 'En pause — ' : ''}{client.name}</span>
-                </div>
-              )}
+            <Input placeholder="Description de la tâche..." value={task} onChange={v => { if (!running) setTask(v) }} style={{ marginBottom: 18 }} T={T} />
+            {!running ? (
+              <Btn full onClick={() => start()} disabled={!clientId} T={T}>▶ Démarrer</Btn>
+            ) : (
+              <div style={{ display: 'flex', gap: 8 }}>
+                {!paused ? (
+                  <button onClick={pause} style={{ flex: 1, padding: '10px', borderRadius: 8, border: `1px solid ${T.warning}50`, background: T.warningBg, color: T.warning, fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', transition: 'all .15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
+                    onMouseEnter={e => e.currentTarget.style.opacity = '.8'} onMouseLeave={e => e.currentTarget.style.opacity = '1'}>⏸ Pause</button>
+                ) : (
+                  <button onClick={resume} style={{ flex: 1, padding: '10px', borderRadius: 8, border: `1px solid ${T.accent}50`, background: T.accentLight, color: T.accent, fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', transition: 'all .15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
+                    onMouseEnter={e => e.currentTarget.style.opacity = '.8'} onMouseLeave={e => e.currentTarget.style.opacity = '1'}>▶ Reprendre</button>
+                )}
+                <button onClick={handleStop} disabled={saving} style={{ flex: 1, padding: '10px', borderRadius: 8, border: `1px solid ${T.danger}40`, background: T.dangerBg, color: T.danger, fontWeight: 700, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer', fontFamily: 'inherit', transition: 'all .15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, opacity: saving ? .7 : 1 }}
+                  onMouseEnter={e => { if (!saving) e.currentTarget.style.opacity = '.8' }} onMouseLeave={e => e.currentTarget.style.opacity = saving ? '.7' : '1'}>
+                  {saving ? <div style={{ width: 13, height: 13, border: `2px solid ${T.danger}40`, borderTopColor: T.danger, borderRadius: '50%', animation: 'spin .6s linear infinite' }} /> : '⏹'}
+                  {saving ? 'Sauvegarde...' : 'Arrêter & sauver'}
+                </button>
+              </div>
+            )}
+            {running && (
+              <div style={{ marginTop: 14, padding: '10px 14px', background: T.surfaceHigh, borderRadius: 8, display: 'flex', justifyContent: 'space-between', fontSize: 12, color: T.textMuted }}>
+                <span>Durée effective</span>
+                <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{(seconds / 3600).toFixed(2)}h · {((seconds / 3600) * (client?.rate || 0)).toFixed(2)} €</span>
+              </div>
+            )}
+          </Card>
+          <Card T={T}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: T.text }}>Sessions récentes</div>
+              <div className="mono" style={{ fontSize: 13, color: T.accent, fontWeight: 500 }}>{totalH}h total</div>
             </div>
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <label style={{ fontSize: 12, color: T.textMuted, fontWeight: 500, display: 'block', marginBottom: 6 }}>Client</label>
-            <select value={clientId} onChange={e => setClientId(e.target.value)} disabled={running}
-              style={{ width: '100%', background: T.surfaceHigh, border: `1px solid ${T.border}`, borderRadius: 8, padding: '9px 12px', color: T.text, fontSize: 13, cursor: running ? 'not-allowed' : 'pointer', opacity: running ? .7 : 1 }}>
-              {clients.map(c => <option key={c.id} value={c.id}>{c.name} — {c.rate}€/h</option>)}
-            </select>
-          </div>
-          <Input placeholder="Description de la tâche..." value={task} onChange={v => { if (!running) setTask(v) }} style={{ marginBottom: 18 }} T={T} />
-          {!running ? (
-            <Btn full onClick={() => start()} disabled={!clientId} T={T}>▶ Démarrer</Btn>
-          ) : (
-            <div style={{ display: 'flex', gap: 8 }}>
-              {!paused ? (
-                <button onClick={pause} style={{ flex: 1, padding: '10px', borderRadius: 8, border: `1px solid ${T.warning}50`, background: T.warningBg, color: T.warning, fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', transition: 'all .15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
-                  onMouseEnter={e => e.currentTarget.style.opacity = '.8'} onMouseLeave={e => e.currentTarget.style.opacity = '1'}>⏸ Pause</button>
-              ) : (
-                <button onClick={resume} style={{ flex: 1, padding: '10px', borderRadius: 8, border: `1px solid ${T.accent}50`, background: T.accentLight, color: T.accent, fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', transition: 'all .15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
-                  onMouseEnter={e => e.currentTarget.style.opacity = '.8'} onMouseLeave={e => e.currentTarget.style.opacity = '1'}>▶ Reprendre</button>
-              )}
-              <button onClick={handleStop} disabled={saving} style={{ flex: 1, padding: '10px', borderRadius: 8, border: `1px solid ${T.danger}40`, background: T.dangerBg, color: T.danger, fontWeight: 700, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer', fontFamily: 'inherit', transition: 'all .15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, opacity: saving ? .7 : 1 }}
-                onMouseEnter={e => { if (!saving) e.currentTarget.style.opacity = '.8' }} onMouseLeave={e => e.currentTarget.style.opacity = saving ? '.7' : '1'}>
-                {saving ? <div style={{ width: 13, height: 13, border: `2px solid ${T.danger}40`, borderTopColor: T.danger, borderRadius: '50%', animation: 'spin .6s linear infinite' }} /> : '⏹'}
-                {saving ? 'Sauvegarde...' : 'Arrêter & sauver'}
-              </button>
-            </div>
-          )}
-          {running && (
-            <div style={{ marginTop: 14, padding: '10px 14px', background: T.surfaceHigh, borderRadius: 8, display: 'flex', justifyContent: 'space-between', fontSize: 12, color: T.textMuted }}>
-              <span>Durée effective</span>
-              <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{(seconds / 3600).toFixed(2)}h · {((seconds / 3600) * (client?.rate || 0)).toFixed(2)} €</span>
-            </div>
-          )}
-        </Card>
-        <Card T={T}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, color: T.text }}>Sessions récentes</div>
-            <div className="mono" style={{ fontSize: 13, color: T.accent, fontWeight: 500 }}>{totalH}h total</div>
-          </div>
-          {sessions.length === 0
-            ? <Empty icon="◷" text="Aucune session" sub="Démarre ton premier timer" T={T} />
-            : sessions.map(s => (
-              <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: `1px solid ${T.border}` }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ width: 6, height: 6, borderRadius: '50%', background: s.clients?.color || T.accent, flexShrink: 0 }} />
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{s.task}</div>
-                    <div style={{ fontSize: 11, color: T.textMuted, marginTop: 1 }}>{s.clients?.name} · {s.date}</div>
+            {sessions.length === 0
+              ? <Empty icon="◷" text="Aucune session" sub="Démarre ton premier timer" T={T} />
+              : sessions.map(s => (
+                <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: `1px solid ${T.border}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: s.clients?.color || T.accent, flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{s.task}</div>
+                      <div style={{ fontSize: 11, color: T.textMuted, marginTop: 1 }}>{s.clients?.name} · {s.date}</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="mono" style={{ fontSize: 13, color: T.accent, fontWeight: 500 }}>{s.duration}h</span>
+                    {s.invoiced && <span style={{ fontSize: 10, background: T.successBg, color: T.success, padding: '2px 6px', borderRadius: 6, fontWeight: 600 }}>Facturée</span>}
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span className="mono" style={{ fontSize: 13, color: T.accent, fontWeight: 500 }}>{s.duration}h</span>
-                  {s.invoiced && <span style={{ fontSize: 10, background: T.successBg, color: T.success, padding: '2px 6px', borderRadius: 6, fontWeight: 600 }}>Facturée</span>}
-                </div>
+              ))
+            }
+          </Card>
+        </div>
+      ) : (
+        /* ── DAILY SERVICES FORM ── */
+        <div className="fade-up grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+          <Card accent T={T}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: T.text, marginBottom: 16 }}>📋 Ajouter un service quotidien</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={{ fontSize: 12, color: T.textMuted, fontWeight: 500, display: 'block', marginBottom: 6 }}>Client *</label>
+                <select value={dailyForm.clientId} onChange={e => setDailyForm({ ...dailyForm, clientId: e.target.value })}
+                  style={{ width: '100%', background: T.surfaceHigh, border: `1px solid ${T.border}`, borderRadius: 8, padding: '9px 12px', color: T.text, fontSize: 13 }}>
+                  <option value="">Sélectionner un client</option>
+                  {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
               </div>
-            ))
-          }
-        </Card>
-      </div>
+              <Input label="Service *" value={dailyForm.service} onChange={v => setDailyForm({ ...dailyForm, service: v })} placeholder="Ex: Mise en page 30 pages/jour" T={T} />
+              <Input label="Tarif mensuel (€) *" type="number" value={dailyForm.rate} onChange={v => setDailyForm({ ...dailyForm, rate: v })} placeholder="300" T={T} />
+              <Input label="Jours par mois" type="number" value={dailyForm.days} onChange={v => setDailyForm({ ...dailyForm, days: v })} placeholder="20" T={T} />
+              <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+                <Btn onClick={saveDailyService} loading={saving} full T={T}>Ajouter le service</Btn>
+                <Btn variant="ghost" onClick={() => setShowDailyForm(false)} T={T}>Annuler</Btn>
+              </div>
+            </div>
+          </Card>
+          <Card T={T}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: T.text, marginBottom: 16 }}>Services enregistrés</div>
+            {dailyServices.length === 0
+              ? <Empty icon="📋" text="Aucun service quotidien" sub="Ajoute tes services récurrents" T={T} />
+              : dailyServices.map((ds, i) => (
+                <div key={ds.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: T.surfaceHigh, borderRadius: 8, marginBottom: i < dailyServices.length - 1 ? 10 : 0 }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: T.text }}>{ds.service}</div>
+                    <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>{ds.clients?.name} · {ds.days_per_month} jours/mois</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span className="mono" style={{ fontSize: 14, fontWeight: 600, color: T.accent }}>{Number(ds.rate).toLocaleString('fr')} €/mois</span>
+                    <Btn small variant="danger" onClick={() => deleteDailyService(ds.id)} T={T}>✕</Btn>
+                  </div>
+                </div>
+              ))
+            }
+            {dailyServices.length > 0 && (
+              <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
+                <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 8 }}>💡 Astuce : À la fin du mois, crée une facture avec tous ces services pour chaque client.</div>
+                <Btn full variant="success" onClick={() => { window.location.href = '/invoices' }}>Créer facture mensuelle →</Btn>
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
     </div>
   )
 }
@@ -918,6 +1021,7 @@ const generatePDF = (invoice, client, settings, visibleFields) => {
   *{margin:0;padding:0;box-sizing:border-box}
   body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:13px;color:#1A1916;background:#FFFFFF;padding:48px}
   @media print{@page{margin:0;size:A4}body{padding:32px 40px}html{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+  @media(max-width:768px){body{padding:20px}}
   .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:44px;padding-bottom:22px;border-bottom:2px solid #1A1916}
   .logo{font-size:26px;font-weight:800;letter-spacing:-1px;color:#1A1916}.logo span{color:#1A6B4A}
   .invoice-title{text-align:right}.invoice-title h1{font-size:30px;font-weight:800;letter-spacing:-1px;color:#1A1916;margin-bottom:4px}
@@ -1746,11 +1850,16 @@ const Quotes = ({ T }) => {
                 const lineTotal = Number(item.qty || 0) * Number(item.rate || 0)
                 return (
                   <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 100px 120px 120px 36px', gap: 8, padding: '8px 14px', borderBottom: i < form.items.length - 1 ? `1px solid ${T.border}` : 'none', alignItems: 'center' }}>
-                    <select value={item.service} onChange={e => updateItem(i, 'service', e.target.value)} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 7, padding: '7px 10px', color: item.service ? T.text : T.textDim, fontSize: 13 }}>
-                      <option value="">Choisir...</option>
-                      {VA_SERVICES.map(s => <option key={s}>{s}</option>)}
-                      <option value="Autre">Autre / personnalisé</option>
-                    </select>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <select value={item.service} onChange={e => updateItem(i, 'service', e.target.value)} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 7, padding: '7px 10px', color: item.service ? T.text : T.textDim, fontSize: 13, flex: 1 }}>
+                        <option value="">Choisir...</option>
+                        {VA_SERVICES.map(s => <option key={s}>{s}</option>)}
+                        <option value="custom">✏️ Autre (personnalisé)</option>
+                      </select>
+                      {item.service === 'custom' && (
+                        <input type="text" value={item.customService || ''} onChange={e => updateItem(i, 'customService', e.target.value)} placeholder="Écrire le service..." style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 7, padding: '7px 10px', color: T.text, fontSize: 13, flex: 1 }} />
+                      )}
+                    </div>
                     <input type="number" placeholder="1" value={item.qty || ''} onChange={e => updateItem(i, 'qty', e.target.value)} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 7, padding: '7px 10px', color: T.text, fontSize: 13, textAlign: 'center' }} />
                     <input type="number" placeholder="0 €" value={item.rate || ''} onChange={e => updateItem(i, 'rate', e.target.value)} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 7, padding: '7px 10px', color: T.text, fontSize: 13 }} />
                     <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: lineTotal > 0 ? T.accent : T.textDim, paddingLeft: 4 }}>{lineTotal > 0 ? `${lineTotal.toFixed(2)} €` : '—'}</div>
