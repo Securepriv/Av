@@ -637,7 +637,7 @@ const AuthPage = ({ onAuth }) => {
         const { error } = await supabase.auth.signUp({
           email: form.email,
           password: form.password,
-          options: {  { full_name: form.name } },
+          options: { data: { full_name: form.name } },
         })
         if (error) throw error
         setSuccess('Compte créé ! Connecte-toi maintenant.')
