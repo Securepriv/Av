@@ -3108,7 +3108,7 @@ const Invoices = ({ T }) => {
 
     setSaving(true)
     try {
-      const {  { user } } = await supabase.auth.getUser()
+      const { data: { user } } = await supabase.auth.getUser()
       const { count } = await supabase
         .from('invoices')
         .select('*', { count: 'exact', head: true })
