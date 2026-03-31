@@ -2391,7 +2391,7 @@ const Timer = ({ T, timerState, timerActions }) => {
     setSaving(true)
     try {
       const saved = await stop(async (sec, cId, tsk) => {
-        const {  { user } } = await supabase.auth.getUser()
+        const { data: { user } } = await supabase.auth.getUser()
         const { data, error } = await supabase.from('sessions').insert({
           user_id: user.id,
           client_id: cId,
