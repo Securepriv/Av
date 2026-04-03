@@ -877,7 +877,7 @@ const AuthPage = ({ onAuth }) => {
   )
 }
 
-// ─── SIDEBAR ──────────────────────────────────────────────────────────────────
+// ─── SIDEBAR ────────────────────────────────────────────────────────────────
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: '📊' },
   { id: 'clients', label: 'Clients', icon: '👥' },
@@ -1095,7 +1095,7 @@ const Sidebar = ({ page, setPage, user, onSignOut, T }) => {
   )
 }
 
-// ─── DASHBOARD ────────────────────────────────────────────────────────────────
+// ─── DASHBOARD ────────────────────────────────────────────────────────────
 const Dashboard = ({ setPage, user, T }) => {
   const [stats, setStats] = useState(null)
   const [pendingInvoices, setPendingInvoices] = useState([])
@@ -1108,11 +1108,9 @@ const Dashboard = ({ setPage, user, T }) => {
         const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
         const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0]
 
-        const [invRes, sesRes, cliRes] = await Promise.all([
-          supabase.from('invoices').select('*,clients(name)').order('created_at', { ascending: false }),
-          supabase.from('sessions').select('duration,date').gte('date', weekAgo),
-          supabase.from('clients').select('id', { count: 'exact', head: true }),
-        ])
+        const invRes = await supabase.from('invoices').select('*,clients(name)').order('created_at', { ascending: false })
+        const sesRes = await supabase.from('sessions').select('duration,date').gte('date', weekAgo)
+        const cliRes = await supabase.from('clients').select('id', { count: 'exact', head: true })
 
         const allInv = invRes.data || []
         const monthInv = allInv.filter((i) => i.created_at >= firstDay)
@@ -1373,7 +1371,7 @@ const Dashboard = ({ setPage, user, T }) => {
   )
 }
 
-// ─── CLIENTS ──────────────────────────────────────────────────────────────────
+// ─── CLIENTS ────────────────────────────────────────────────────────────────
 const Clients = ({ T, setPage }) => {
   const [clients, setClients] = useState([])
   const [loading, setLoading] = useState(true)
@@ -1405,8 +1403,8 @@ const Clients = ({ T, setPage }) => {
 
   const load = useCallback(async () => {
     try {
-      const { data } = await supabase.from('clients').select('*').order('created_at', { ascending: false })
-      setClients(data || [])
+      const res = await supabase.from('clients').select('*').order('created_at', { ascending: false })
+      setClients(res.data || [])
     } catch (error) {
       console.error('Error loading clients:', error)
     } finally {
@@ -1422,10 +1420,8 @@ const Clients = ({ T, setPage }) => {
     setSelectedClient(c)
     setLoadingDetail(true)
     try {
-      const [sesRes, invRes] = await Promise.all([
-        supabase.from('sessions').select('').eq('client_id', c.id).order('date', { ascending: false }),
-        supabase.from('invoices').select('').eq('client_id', c.id).order('created_at', { ascending: false }),
-      ])
+      const sesRes = await supabase.from('sessions').select('').eq('client_id', c.id).order('date', { ascending: false })
+      const invRes = await supabase.from('invoices').select('').eq('client_id', c.id).order('created_at', { ascending: false })
       setClientDetail({ sessions: sesRes.data || [], invoices: invRes.data || [] })
     } catch (error) {
       console.error('Error loading client detail:', error)
@@ -1480,11 +1476,11 @@ const Clients = ({ T, setPage }) => {
         custom_fields: form.customFields.filter((f) => f.label.trim()),
       }
 
-      const { error } = editId
+      const result = editId
         ? await supabase.from('clients').update(payload).eq('id', editId)
         : await supabase.from('clients').insert(payload)
 
-      if (error) throw error
+      if (result.error) throw result.error
       notify(editId ? 'Client mis à jour !' : 'Client ajouté !')
       setShowForm(false)
       setForm(emptyForm)
@@ -2082,7 +2078,7 @@ const Clients = ({ T, setPage }) => {
   )
 }
 
-// ─── TRAVAUX PAYÉS ─────────────────────────────────────────────────────────────
+// ─── TRAVAUX PAYÉS ────────────────────────────────────────────────────────────
 const PaidWork = ({ T }) => {
   const [clients, setClients] = useState([])
   const [selected, setSelected] = useState(null)
@@ -2096,8 +2092,8 @@ const PaidWork = ({ T }) => {
       .from('clients')
       .select('*')
       .order('name')
-      .then(({ data }) => {
-        setClients(data || [])
+      .then((res) => {
+        setClients(res.data || [])
         setLoading(false)
       })
   }, [])
@@ -2106,20 +2102,20 @@ const PaidWork = ({ T }) => {
     setSelected(c)
     setLoadingDetail(true)
     try {
-      const [sesRes, invRes] = await Promise.all([
-        supabase
-          .from('sessions')
-          .select('')
-          .eq('client_id', c.id)
-          .eq('invoiced', true)
-          .order('date', { ascending: false }),
-        supabase
-          .from('invoices')
-          .select('')
-          .eq('client_id', c.id)
-          .eq('status', 'payée')
-          .order('created_at', { ascending: false }),
-      ])
+      const sesRes = await supabase
+        .from('sessions')
+        .select('')
+        .eq('client_id', c.id)
+        .eq('invoiced', true)
+        .order('date', { ascending: false })
+
+      const invRes = await supabase
+        .from('invoices')
+        .select('')
+        .eq('client_id', c.id)
+        .eq('status', 'payée')
+        .order('created_at', { ascending: false })
+
       setPaidSessions(sesRes.data || [])
       setPaidInvoices(invRes.data || [])
     } catch (error) {
@@ -2392,7 +2388,7 @@ const Timer = ({ T, timerState, timerActions }) => {
     try {
       const saved = await stop(async (sec, cId, tsk) => {
         const { data: { user } } = await supabase.auth.getUser()
-        const { data, error } = await supabase.from('sessions').insert({
+        const res = await supabase.from('sessions').insert({
           user_id: user.id,
           client_id: cId,
           task: tsk || 'Tâche sans titre',
@@ -2400,8 +2396,9 @@ const Timer = ({ T, timerState, timerActions }) => {
           date: new Date().toISOString().split('T')[0],
           invoiced: false,
         }).select('*,clients(name,color)').single()
-        if (error) throw error
-        return data
+        
+        if (res.error) throw res.error
+        return res.data
       })
       if (saved) notify('Session sauvegardée !')
       else notify('Erreur lors de la sauvegarde', 'error')
@@ -2415,8 +2412,8 @@ const Timer = ({ T, timerState, timerActions }) => {
 
   const loadDailyServices = useCallback(async () => {
     try {
-      const { data } = await supabase.from('daily_services').select('*,clients(name)').order('created_at', { ascending: false })
-      setDailyServices(data || [])
+      const res = await supabase.from('daily_services').select('*,clients(name)').order('created_at', { ascending: false })
+      setDailyServices(res.data || [])
     } catch (error) {
       console.error('Error loading daily services:', error)
     }
@@ -2434,7 +2431,7 @@ const Timer = ({ T, timerState, timerActions }) => {
     setSaving(true)
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      const { error } = await supabase.from('daily_services').insert({
+      const res = await supabase.from('daily_services').insert({
         user_id: user.id,
         client_id: dailyForm.clientId,
         service: dailyForm.service,
@@ -2442,7 +2439,8 @@ const Timer = ({ T, timerState, timerActions }) => {
         days_per_month: Number(dailyForm.days),
         date_added: new Date().toISOString().split('T')[0],
       })
-      if (error) throw error
+      
+      if (res.error) throw res.error
       notify('Service quotidien ajouté !')
       setShowDailyForm(false)
       loadDailyServices()
@@ -3030,18 +3028,19 @@ const Invoices = ({ T }) => {
   const load = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      const [{  inv }, {  cli }, {  set }] = await Promise.all([
-        supabase
-          .from('invoices')
-          .select('*,clients(name,email,company,phone,vat_id,color)')
-          .order('created_at', { ascending: false }),
-        supabase.from('clients').select('').order('name'),
-        supabase.from('settings').select('').eq('user_id', user.id).single(),
-      ])
-      setInvoices(inv || [])
-      setClients(cli || [])
-      setSettings(set ? { ...set, email: user.email } : { email: user.email })
-      if (cli?.length) setForm((f) => ({ ...f, clientId: cli[0].id }))
+      const invRes = await supabase
+        .from('invoices')
+        .select('*,clients(name,email,company,phone,vat_id,color)')
+        .order('created_at', { ascending: false })
+      
+      const cliRes = await supabase.from('clients').select('').order('name')
+      
+      const setRes = await supabase.from('settings').select('').eq('user_id', user.id).single()
+
+      setInvoices(invRes.data || [])
+      setClients(cliRes.data || [])
+      setSettings(setRes.data ? { ...setRes.data, email: user.email } : { email: user.email })
+      if (cliRes.data?.length) setForm((f) => ({ ...f, clientId: cliRes.data[0].id }))
     } catch (error) {
       console.error('Error loading invoices:', error)
     } finally {
@@ -3058,13 +3057,13 @@ const Invoices = ({ T }) => {
     setLoadingSessions(true)
     setSelectedSessions([])
     try {
-      const { data } = await supabase
+      const res = await supabase
         .from('sessions')
         .select('*')
         .eq('client_id', clientId)
         .eq('invoiced', false)
         .order('date', { ascending: false })
-      setSessions(data || [])
+      setSessions(res.data || [])
     } catch (error) {
       console.error('Error loading sessions:', error)
     } finally {
@@ -3109,12 +3108,12 @@ const Invoices = ({ T }) => {
     setSaving(true)
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      const { count } = await supabase
+      const cntRes = await supabase
         .from('invoices')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.id)
 
-      const num = `FAC-${String((count || 0) + 1).padStart(3, '0')}`
+      const num = `FAC-${String((cntRes.count || 0) + 1).padStart(3, '0')}`
       let items = []
       let clientIdToSave = form.clientId || null
 
@@ -3160,8 +3159,8 @@ const Invoices = ({ T }) => {
         free_client_email: invoiceMode === 'free' ? form.freeClientEmail : null,
       }
 
-      const { error } = await supabase.from('invoices').insert(payload)
-      if (error) throw error
+      const res = await supabase.from('invoices').insert(payload)
+      if (res.error) throw res.error
 
       if (invoiceMode === 'hours' && selectedSessions.length > 0) {
         await supabase.from('sessions').update({ invoiced: true }).in('id', selectedSessions)
@@ -4511,7 +4510,7 @@ const Invoices = ({ T }) => {
   )
 }
 
-// ─── QUOTES ───────────────────────────────────────────────────────────────────
+// ─── QUOTES ────────────────────────────────────────────────────────────────
 const Quotes = ({ T }) => {
   const [quotes, setQuotes] = useState([])
   const [settings, setSettings] = useState(null)
@@ -4538,12 +4537,10 @@ const Quotes = ({ T }) => {
 
   const load = useCallback(async () => {
     try {
-      const [{  q }, {  s }] = await Promise.all([
-        supabase.from('quotes').select('').order('created_at', { ascending: false }),
-        supabase.from('settings').select('').single(),
-      ])
-      setQuotes(q || [])
-      setSettings(s)
+      const qRes = await supabase.from('quotes').select('').order('created_at', { ascending: false })
+      const sRes = await supabase.from('settings').select('').single()
+      setQuotes(qRes.data || [])
+      setSettings(sRes.data)
     } catch (error) {
       console.error('Error loading quotes:', error)
     } finally {
@@ -4579,13 +4576,13 @@ const Quotes = ({ T }) => {
     setSaving(true)
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      const { count } = await supabase
+      const cntRes = await supabase
         .from('quotes')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.id)
 
-      const ref = `DEV-${String((count || 0) + 1).padStart(3, '0')}`
-      const { error } = await supabase.from('quotes').insert({
+      const ref = `DEV-${String((cntRes.count || 0) + 1).padStart(3, '0')}`
+      const res = await supabase.from('quotes').insert({
         user_id: user.id,
         ref,
         prospect_name: form.prospectName,
@@ -4600,7 +4597,7 @@ const Quotes = ({ T }) => {
         valid_days: form.validDays,
       })
 
-      if (error) throw error
+      if (res.error) throw res.error
       notify('Devis créé !')
       setShowForm(false)
       setForm(emptyForm)
@@ -4615,7 +4612,7 @@ const Quotes = ({ T }) => {
   const sendQuote = (q) => {
     const subject = encodeURIComponent(`Devis ${q.ref} — ${settings?.full_name || ''}`)
     const body = encodeURIComponent(
-      `Bonjour ${q.prospect_name || ''},\n\nVeuillez trouver ci-joint mon devis ${q.ref} d'un montant de ${Number(q.amount).toLocaleString('fr')} €.\n\nCe devis est valable ${q.valid_days || 30} jours.\n\nCordialement,\n${settings?.full_name || ''}`
+      `Bonjour ${q.prospect_name || ''},\n\nVeuillez trouver ci-joint mon devis ${q.ref} d'un montant de ${Number(q.amount).toLocaleString('fr')} €.\n\nCe devis est valable ${q.valid_days || 30} jours à compter de la date d'émission.\n\nCordialement,\n${settings?.full_name || ''}`
     )
     window.open(`mailto:${q.prospect_email || ''}?subject=${subject}&body=${body}`)
   }
@@ -5201,7 +5198,7 @@ const Quotes = ({ T }) => {
   )
 }
 
-// ─── SETTINGS ─────────────────────────────────────────────────────────────────
+// ─── SETTINGS ───────────────────────────────────────────────────────────���────
 const Settings = ({ user, T, theme, setTheme }) => {
   const [profile, setProfile] = useState({
     full_name: '',
@@ -5226,18 +5223,18 @@ const Settings = ({ user, T, theme, setTheme }) => {
       .select('*')
       .eq('user_id', user.id)
       .single()
-      .then(({ data }) => {
-        if (data) {
+      .then((res) => {
+        if (res.data) {
           setProfile({
-            full_name: data.full_name || '',
-            siret: data.siret || '',
-            tva_number: data.tva_number || '',
+            full_name: res.data.full_name || '',
+            siret: res.data.siret || '',
+            tva_number: res.data.tva_number || '',
             email: user?.email || '',
-            bank_details: data.bank_details || '',
+            bank_details: res.data.bank_details || '',
           })
           setReminders({
-            reminder_before: data.reminder_before || 3,
-            reminder_after: data.reminder_after || 7,
+            reminder_before: res.data.reminder_before || 3,
+            reminder_after: res.data.reminder_after || 7,
           })
         }
         setLoading(false)
@@ -5841,7 +5838,7 @@ const generateQuotePDF = (quote, settings) => {
   }
 }
 
-// ─── APP ROOT ─────────────────────────────────────────────────────────────────
+// ─── APP ROOT ────────────────────────────────────────────────────────────────
 export default function App() {
   const [user, setUser] = useState(undefined)
   const [page, setPage] = useState('dashboard')
@@ -5861,9 +5858,9 @@ export default function App() {
       .from('clients')
       .select('*')
       .order('name')
-      .then(({ data }) => {
-        setTimerClients(data || [])
-        if (data?.length && !timerClientId) setTimerClientId(data[0].id)
+      .then((res) => {
+        setTimerClients(res.data || [])
+        if (res.data?.length && !timerClientId) setTimerClientId(res.data[0].id)
       })
   }, [user])
 
@@ -5882,7 +5879,7 @@ export default function App() {
       .select('*,clients(name,color)')
       .order('date', { ascending: false })
       .limit(20)
-      .then(({ data }) => setTimerSessions(data || []))
+      .then((res) => setTimerSessions(res.data || []))
   }, [])
 
   const timerActions = {
@@ -5935,8 +5932,8 @@ export default function App() {
   const timerClient = timerClients.find((c) => c.id === timerClientId)
 
   useEffect(() => {
-    supabase.auth.getUser().then(({  { user } }) => setUser(user || null))
-    const {  { subscription } } = supabase.auth.onAuthStateChange((_, session) =>
+    supabase.auth.getUser().then(({ data: { user } }) => setUser(user || null))
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) =>
       setUser(session?.user || null)
     )
     return () => subscription.unsubscribe()
